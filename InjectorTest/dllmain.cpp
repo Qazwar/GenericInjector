@@ -17,7 +17,7 @@ public:
 	}
 
 	__declspec(noinline)
-	void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, unsigned short uType, int iReturnedValue)
+	void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, double uType, int iReturnedValue)
 	{
 		// Output the argument of our injected function MessageBoxW passed by origin program
 		std::wcout << hWnd << std::endl << lpText << std::endl << lpCaption << std::endl << uType << std::endl << iReturnedValue << std::endl;

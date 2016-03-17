@@ -18,6 +18,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 	switch (CallingConvention)
 	{
 	case CallingConventionEnum::Thiscall:
+		// TODO: implement passing variable argument
 		if (HasVariableArgument())
 		{
 			LPDWORD tpReturn;
@@ -157,73 +158,80 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 	{
 		// ReSharper disable once CppEntityNeverUsed
 		LPDWORD tpReturn;
-		if (!ReceiveReturnedValue)
+		if (HasVariableArgument())
 		{
-			__asm
+			if (!ReceiveReturnedValue)
 			{
-				push ecx;
-				push edx;
+				__asm
+				{
+					push ecx;
+					push edx;
 
-				sub esp, ActualArgSize;
-				lea eax, [esp];
-				mov tpReturn, eax;
+					sub esp, ActualArgSize;
+					lea eax, [esp];
+					mov tpReturn, eax;
 
-				push ActualArgSize;
-				push pArgs;
-				push eax;
-				call memcpy;
-				add esp, 12;
+					push ActualArgSize;
+					push pArgs;
+					push eax;
+					call memcpy;
+					add esp, 12;
 
-				mov eax, pFunc;
-				call eax;
+					mov eax, pFunc;
+					call eax;
 
-				push ActualArgSize;
-				push tpReturn;
-				push pStackTop;
-				call memcpy;
-				add esp, 12;
+					push ActualArgSize;
+					push tpReturn;
+					push pStackTop;
+					call memcpy;
+					add esp, 12;
 
-				mov tReturnValue, eax;
-				add esp, ActualArgSize;
+					mov tReturnValue, eax;
+					add esp, ActualArgSize;
 
-				pop edx;
-				pop ecx;
+					pop edx;
+					pop ecx;
+				}
+			}
+			else
+			{
+				tReturnValue = *lpReturnValue;
+				__asm
+				{
+					push ecx;
+					push edx;
+
+					push tReturnValue;
+					sub esp, ArgSize;
+					lea eax, [esp];
+					mov tpReturn, eax;
+
+					push ArgSize;
+					push pArgs;
+					push eax;
+					call memcpy;
+					add esp, 12;
+
+					mov eax, pFunc;
+					call eax;
+
+					push ArgSize;
+					push tpReturn;
+					push pStackTop;
+					call memcpy;
+					add esp, 12;
+
+					add esp, ArgSize;
+					pop tReturnValue;
+
+					pop edx;
+					pop ecx;
+				}
 			}
 		}
 		else
 		{
-			tReturnValue = *lpReturnValue;
-			__asm
-			{
-				push ecx;
-				push edx;
-
-				push tReturnValue;
-				sub esp, ArgSize;
-				lea eax, [esp];
-				mov tpReturn, eax;
-
-				push ArgSize;
-				push pArgs;
-				push eax;
-				call memcpy;
-				add esp, 12;
-
-				mov eax, pFunc;
-				call eax;
-
-				push ArgSize;
-				push tpReturn;
-				push pStackTop;
-				call memcpy;
-				add esp, 12;
-
-				add esp, ArgSize;
-				pop tReturnValue;
-
-				pop edx;
-				pop ecx;
-			}
+			// TODO: implement passing variable argument
 		}
 
 		return tReturnValue;

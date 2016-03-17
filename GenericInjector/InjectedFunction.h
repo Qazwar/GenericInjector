@@ -15,7 +15,7 @@ struct CastArgs
 	static void Execute(const byte* pOrigin, byte* pOut)
 	{
 		*reinterpret_cast<typename T2::Type*>(pOut) = static_cast<typename T2::Type>(*reinterpret_cast<const typename T1::Type*>(pOrigin));
-		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + sizeof(LPVOID) /*sizeof(typename T1::Type)*/, pOut + sizeof(LPVOID) /*sizeof(typename T2::Type)*/);
+		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + calc_align(sizeof(typename T1::Type)), pOut + calc_align(sizeof(typename T2::Type)));
 	}
 };
 
@@ -94,8 +94,8 @@ public:
 
 	DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) override
 	{
-		constexpr uint tmpArgSize = FunctionInfo::ArgType::Count * sizeof(LPVOID);
-		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - sizeof(LPVOID) : tmpArgSize;
+		constexpr uint tmpArgSize = FunctionInfo::ArgType::AlignedSize;
+		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - calc_align(sizeof(typename GetType<FunctionInfo::ArgType::Count - 1, typename FunctionInfo::ArgType>::Type)) : tmpArgSize;
 		byte tArg[tmpArgSize];
 
 		if (pCastArgFunc)
@@ -165,20 +165,23 @@ public:
 	template <typename Func>
 	LPVOID Replace(Func pFunc)
 	{
-		typedef typename FunctionAnalysis::FunctionAnalysis::ArgType Func1Arg;
+		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
-		static_assert(SequenceConvertible<Func2Arg, Func1Arg>::value, "Arguments between original and provided function are impatient.");
+		//static_assert(SequenceConvertible<Func2Arg, Func1Arg>::value, "Arguments between original and provided function are impatient.");
+		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
 
-		auto tRet = m_ReplacedFunc ? m_ReplacedFunc->GetFunctionPointer() : nullptr;
-		m_ReplacedFunc = std::move(std::make_unique<InjectedFunction<Func>>(pFunc));
+		auto tRet = m_ReplacedFunc.first ? m_ReplacedFunc.first->GetFunctionPointer() : nullptr;
+		m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<Func>>(pFunc));
+		m_ReplacedFunc.second = GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute;
 
 		return tRet;
 	}
 
 	LPVOID Replace(nullptr_t)
 	{
-		auto tRet = m_ReplacedFunc ? m_ReplacedFunc->GetFunctionPointer() : nullptr;
-		m_ReplacedFunc.reset();
+		auto tRet = m_ReplacedFunc.first ? m_ReplacedFunc.first->GetFunctionPointer() : nullptr;
+		m_ReplacedFunc.first.reset();
+		m_ReplacedFunc.second = nullptr;
 		return tRet;
 	}
 
@@ -216,15 +219,15 @@ public:
 	{
 		DWORD tReturnValue = 0ul;
 		bool tReceiveReturnedValue;
-		const DWORD tArgSize = m_ReplacedFunc ? m_ReplacedFunc->GetArgSize() : 0ul;
+		const DWORD tArgSize = FunctionAnalysis::FunctionAnalysis::ArgType::AlignedSize;
 
 		for (auto& Func : m_BeforeFunc)
 		{
 			Func.first->Call(Func.second, lpStackTop, &tReturnValue, tArgSize, false);
 		}
-		if (m_ReplacedFunc)
+		if (m_ReplacedFunc.first)
 		{
-			tReturnValue = m_ReplacedFunc->Call(nullptr, lpStackTop, &tReturnValue, tArgSize, false);
+			tReturnValue = m_ReplacedFunc.first->Call(m_ReplacedFunc.second, lpStackTop, &tReturnValue, tArgSize, false);
 		}
 		__asm mov tReturnValue, eax;
 		
@@ -237,7 +240,7 @@ public:
 	}
 
 private:
-	std::unique_ptr<Functor> m_ReplacedFunc;
+	std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc> m_ReplacedFunc;
 	std::vector<std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc>> m_BeforeFunc;
 	std::vector<std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc>> m_AfterFunc;
 };

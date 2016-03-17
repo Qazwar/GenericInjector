@@ -5,6 +5,16 @@
 typedef uint32_t uint;
 typedef uint8_t byte;
 
+enum : uint
+{
+	DefaultAlignBase = sizeof(void*),
+};
+
+constexpr unsigned int calc_align(unsigned int n, unsigned int align = DefaultAlignBase)
+{
+	return n + align - 1 & ~(align - 1);
+}
+
 template <typename T1, typename T2>
 struct IsSameTemplate
 {
@@ -30,6 +40,7 @@ struct TypeSequence<T, _Rest...>
 	{
 		Count = 1 + sizeof...(_Rest),
 		Size = sizeof(Type) + Rest::Size,
+		AlignedSize = calc_align(sizeof(Type), DefaultAlignBase) + Rest::AlignedSize,
 	};
 };
 
@@ -40,6 +51,7 @@ struct TypeSequence<>
 	{
 		Count = 0,
 		Size = 0,
+		AlignedSize = 0,
 	};
 };
 

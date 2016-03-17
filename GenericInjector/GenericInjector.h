@@ -117,7 +117,8 @@ private:
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of inject function");
 		}
 
-		pInjector->m_ReplacedFunc = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
+		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
+		pInjector->m_ReplacedFunc.second = nullptr;
 		*lpAddr = reinterpret_cast<DWORD>(pInjectImportTableEntry);
 		if (!VirtualProtect(lpAddr, sizeof(LPVOID), tOldProtect, &tOldProtect))
 		{
