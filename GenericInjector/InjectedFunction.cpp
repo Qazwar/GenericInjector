@@ -160,6 +160,10 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 		LPDWORD tpReturn;
 		if (HasVariableArgument())
 		{
+			// TODO: implement passing variable argument
+		}
+		else
+		{
 			if (!ReceiveReturnedValue)
 			{
 				__asm
@@ -180,7 +184,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					mov eax, pFunc;
 					call eax;
 
-					push ActualArgSize;
+					push ArgSize;
 					push tpReturn;
 					push pStackTop;
 					call memcpy;
@@ -202,11 +206,11 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					push edx;
 
 					push tReturnValue;
-					sub esp, ArgSize;
+					sub esp, ActualArgSize;
 					lea eax, [esp];
 					mov tpReturn, eax;
 
-					push ArgSize;
+					push ActualArgSize;
 					push pArgs;
 					push eax;
 					call memcpy;
@@ -221,17 +225,13 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					call memcpy;
 					add esp, 12;
 
-					add esp, ArgSize;
+					add esp, ActualArgSize;
 					pop tReturnValue;
 
 					pop edx;
 					pop ecx;
 				}
 			}
-		}
-		else
-		{
-			// TODO: implement passing variable argument
 		}
 
 		return tReturnValue;
