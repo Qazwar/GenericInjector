@@ -15,7 +15,7 @@ struct CastArgs
 	static void Execute(const byte* pOrigin, byte* pOut)
 	{
 		*reinterpret_cast<typename T2::Type*>(pOut) = static_cast<typename T2::Type>(*reinterpret_cast<const typename T1::Type*>(pOrigin));
-		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + sizeof(typename T1::Type), pOut + sizeof(typename T2::Type));
+		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + sizeof(LPVOID) /*sizeof(typename T1::Type)*/, pOut + sizeof(LPVOID) /*sizeof(typename T2::Type)*/);
 	}
 };
 
@@ -29,17 +29,20 @@ struct CastArgs<TypeSequence<>, TypeSequence<>>
 
 struct Functor
 {
-	typedef void(*CastArgFunc)(const byte*, byte*);
+	typedef void (*CastArgFunc)(const byte*, byte*);
 
 	virtual ~Functor() = default;
 
+	virtual bool HasVariableArgument() const noexcept = 0;
+
 	virtual LPVOID GetFunctionPointer() const noexcept = 0;
+	virtual LPVOID GetObjectPointer() const noexcept = 0;
 	virtual DWORD GetArgSize() const noexcept = 0;
 	virtual DWORD GetArgCount() const noexcept = 0;
 	virtual DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) = 0;
 
 protected:
-	DWORD CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTop, LPVOID pArgs, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) const;
+	DWORD CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTop, LPVOID pArgs, LPDWORD lpReturnValue, DWORD ArgSize, DWORD ActualArgSize, bool ReceiveReturnedValue) const;
 };
 
 template <typename Func>
@@ -51,13 +54,32 @@ public:
 
 	// ReSharper disable once CppNonExplicitConvertingConstructor
 	InjectedFunction(Func pFunc)
-		: m_pFunc(pFunc)
+		: m_pFunc(pFunc),
+		m_pObject(nullptr)
 	{
+	}
+
+	InjectedFunction(typename FunctionInfo::ClassType* pObject, Func pFunc)
+		: m_pFunc(pFunc),
+		m_pObject(pObject)
+	{
+	}
+
+	~InjectedFunction() = default;
+
+	bool HasVariableArgument() const noexcept override
+	{
+		return FunctionInfo::HasVariableArgument;
 	}
 
 	LPVOID GetFunctionPointer() const noexcept override
 	{
-		return m_pFunc;
+		return *reinterpret_cast<void* const*>(reinterpret_cast<const void*>(&m_pFunc));
+	}
+
+	LPVOID GetObjectPointer() const noexcept override
+	{
+		return m_pObject;
 	}
 
 	DWORD GetArgSize() const noexcept override
@@ -72,19 +94,22 @@ public:
 
 	DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) override
 	{
-		byte tArg[FunctionInfo::ArgType::Size];
+		constexpr uint tmpArgSize = FunctionInfo::ArgType::Count * sizeof(LPVOID);
+		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - sizeof(LPVOID) : tmpArgSize;
+		byte tArg[tmpArgSize];
 
 		if (pCastArgFunc)
 		{
 			pCastArgFunc(static_cast<const byte*>(pStackTop), tArg);
-			return CallImpl(FunctionInfo::CallingConvention, pStackTop, tArg, lpReturnValue, ArgSize, ReceiveReturnedValue);
+			return CallImpl(FunctionInfo::CallingConvention, pStackTop, tArg, lpReturnValue, ArgSize, ActualArgSize, ReceiveReturnedValue);
 		}
 
-		return CallImpl(FunctionInfo::CallingConvention, pStackTop, nullptr, lpReturnValue, ArgSize, ReceiveReturnedValue);
+		return CallImpl(FunctionInfo::CallingConvention, pStackTop, nullptr, lpReturnValue, ArgSize, ActualArgSize, ReceiveReturnedValue);
 	}
 
 private:
 	Func m_pFunc;
+	typename FunctionInfo::ClassType* m_pObject;
 };
 
 template <typename Func>
@@ -160,19 +185,31 @@ public:
 	template <typename Func>
 	void RegisterBefore(Func pFunc)
 	{
-		typedef typename FunctionAnalysis::FunctionAnalysis::ArgType Func1Arg;
+		RegisterBefore(nullptr, pFunc);
+	}
+
+	template <typename Func>
+	void RegisterBefore(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
+	{
+		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_BeforeFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
+		m_BeforeFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
 	}
 
 	template <typename Func>
 	void RegisterAfter(Func pFunc)
 	{
-		typedef typename FunctionAnalysis::FunctionAnalysis::ArgType Func1Arg;
+		RegisterAfter(nullptr, pFunc);
+	}
+
+	template <typename Func>
+	void RegisterAfter(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
+	{
+		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_AfterFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
+		m_AfterFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
 	}
 
 	void Execute(LPVOID lpStackTop) override
