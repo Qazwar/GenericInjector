@@ -49,6 +49,11 @@ public:
 			auto pInjector2 = InjectImportTable<decltype(&putchar)>(_T("ucrtbased.dll"), _T("putchar"));
 			pInjector2->RegisterAfter(PutC);
 			pInjector2->Replace(nullptr);
+
+			// nop
+			//byte tmpCode[]{ 0x90, };
+			// NOTE: Only usable on my machine, if you want to test it you should get the rva of the code you want to modify and replace arguments.
+			//ModifyCode(GetInstance(), 0x16501, 0x47, tmpCode, 1);
 		}
 		catch (std::system_error& sysex)
 		{

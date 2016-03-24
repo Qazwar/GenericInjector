@@ -74,6 +74,40 @@ protected:
 	// Cannot call this in hooking function because unhooking will delete the injector
 	void UnhookInjector(DWORD FunctionAddr);
 
+	template <typename Container>
+	static void GetCode(HMODULE hInstance, DWORD dwOffset, DWORD dwSize, Container& container)
+	{
+		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
+		DWORD oldProtect;
+		if (!VirtualProtect(pCode, dwSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+		{
+			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+		}
+		container.insert(container.end(), pCode, pCode + dwSize);
+		if (!VirtualProtect(pCode, dwSize, oldProtect, &oldProtect))
+		{
+			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+		}
+	}
+
+	template <size_t Size>
+	static void GetCode(HMODULE hInstance, DWORD dwOffset, byte (&Buffer)[Size])
+	{
+		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
+		DWORD oldProtect;
+		if (!VirtualProtect(pCode, Size, PAGE_EXECUTE_READWRITE, &oldProtect))
+		{
+			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+		}
+		memcpy_s(Buffer, Size, pCode, Size);
+		if (!VirtualProtect(pCode, Size, oldProtect, &oldProtect))
+		{
+			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+		}
+	}
+
+	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+
 private:
 	HMODULE m_hDll, m_hInstance;
 	std::unique_ptr<PEPaser> m_pPEPaser;

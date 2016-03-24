@@ -4,7 +4,8 @@ namespace
 {
 	// Used for injecting stdcall function which prototype is same as function InjectorHelper
 	// Avoid using ecx and edx because they may be used in function calling
-	const byte InjectStdcallTemplate[] = {
+	const byte InjectStdcallTemplate[]
+	{
 		0x53,								//push ebx
 		0x8D, 0x5C, 0x24, 0x08,				//lea ebx, [esp+8] // skip saved ebx and ret addr which is pushed by instruction call
 		0x56,								//push esi
@@ -15,10 +16,11 @@ namespace
 		0xFF, 0xD0,							//call eax
 		0x5E,								//pop esi
 		0x5B,								//pop ebx
-		0xC2, 0x00, 0x00,					//ret 0 // clear the stack and return
+		0xC2, 0x00, 0x00,					//ret 0(+17) // clear the stack and return
 	};
 
-	const byte InjectCdeclTemplate[] = {
+	const byte InjectCdeclTemplate[]
+	{
 		0x53,								//push ebx
 		0x8D, 0x5C, 0x24, 0x08,				//lea ebx, [esp+8] // skip saved ebx and ret addr which is pushed by instruction call
 		0x56,								//push esi
@@ -30,6 +32,11 @@ namespace
 		0x5E,								//pop esi
 		0x5B,								//pop ebx
 		0xC3,								//retn // return
+	};
+
+	const byte JmpTemplate[]
+	{
+		0xE9, 0x00, 0x00, 0x00, 0x00,		//jmp 0x00000000(+1) // offset
 	};
 
 	__declspec(noinline)
@@ -115,6 +122,35 @@ void GenericInjector::UnhookInjector(DWORD FunctionAddr)
 
 		itea->second.first.clear();
 		itea->second.second.reset();
+	}
+}
+
+void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
+{
+	if (dwDestSize < sizeof JmpTemplate)
+	{
+		throw std::invalid_argument("Size of dest code should be at least bigger than JmpTemplate.");
+	}
+
+	byte* pDest = reinterpret_cast<byte*>(hInstance) + dwDestOffset;
+	byte* pNewCode = AllocCode(dwCodeSize + sizeof JmpTemplate);
+	memcpy_s(pNewCode, dwCodeSize + sizeof JmpTemplate, lpCode, dwCodeSize);
+	byte pJmpCode[sizeof JmpTemplate];
+	memcpy_s(pJmpCode, sizeof JmpTemplate, JmpTemplate, sizeof JmpTemplate);
+	*reinterpret_cast<DWORD*>(pJmpCode + 1) = static_cast<DWORD>(pDest + dwDestSize - (pNewCode + dwCodeSize) - sizeof pJmpCode);
+	memcpy_s(pNewCode + dwCodeSize, sizeof JmpTemplate, pJmpCode, sizeof pJmpCode);
+	FlushCode(hInstance, pNewCode, dwCodeSize + sizeof JmpTemplate);
+	
+	*reinterpret_cast<DWORD*>(pJmpCode + 1) = static_cast<DWORD>(pNewCode - pDest - sizeof pJmpCode);
+	DWORD oldProtect;
+	if (!VirtualProtect(pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+	}
+	memcpy_s(pDest, dwDestSize, pJmpCode, sizeof pJmpCode);
+	if (!VirtualProtect(pDest, dwDestSize, oldProtect, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 	}
 }
 
