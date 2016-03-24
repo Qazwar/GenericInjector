@@ -151,14 +151,11 @@
     <ClInclude Include="InjectedFunction.h" />
     <ClInclude Include="Misc.h" />
     <ClInclude Include="PEParser.h" />
-    <ClInclude Include="stdafx.h" />
-    <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="GenericInjector.cpp" />
     <ClCompile Include="InjectedFunction.cpp" />
     <ClCompile Include="PEParser.cpp" />
-    <ClCompile Include="stdafx.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

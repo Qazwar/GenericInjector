@@ -72,6 +72,7 @@ public:
 		return FunctionInfo::HasVariableArgument;
 	}
 
+	// <FIXME>: Use formal solution
 	LPVOID GetFunctionPointer() const noexcept override
 	{
 		return *reinterpret_cast<void* const*>(reinterpret_cast<const void*>(&m_pFunc));
@@ -197,7 +198,7 @@ public:
 		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_BeforeFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
+		m_BeforeFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
 	}
 
 	template <typename Func>
@@ -212,14 +213,14 @@ public:
 		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_AfterFunc.emplace_back(std::move(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute)));
+		m_AfterFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
 	}
 
 	void Execute(LPVOID lpStackTop) override
 	{
 		DWORD tReturnValue = 0ul;
 		bool tReceiveReturnedValue;
-		const DWORD tArgSize = FunctionAnalysis::FunctionAnalysis::ArgType::AlignedSize;
+		constexpr auto tArgSize = FunctionAnalysis::FunctionAnalysis::ArgType::AlignedSize;
 
 		for (auto& Func : m_BeforeFunc)
 		{
@@ -228,6 +229,10 @@ public:
 		if (m_ReplacedFunc.first)
 		{
 			tReturnValue = m_ReplacedFunc.first->Call(m_ReplacedFunc.second, lpStackTop, &tReturnValue, tArgSize, false);
+		}
+		else
+		{
+			__asm xor eax, eax;
 		}
 		__asm mov tReturnValue, eax;
 		

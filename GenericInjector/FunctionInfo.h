@@ -10,7 +10,7 @@ enum : uint
 	DefaultAlignBase = sizeof(void*),
 };
 
-constexpr unsigned int calc_align(unsigned int n, unsigned int align = DefaultAlignBase)
+constexpr uint calc_align(uint n, uint align = DefaultAlignBase)
 {
 	return n + align - 1 & ~(align - 1);
 }

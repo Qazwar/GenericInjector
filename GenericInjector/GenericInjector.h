@@ -2,26 +2,16 @@
 #include "InjectedFunction.h"
 #include "PEParser.h"
 #include <stdexcept>
-
-byte* GenerateInjectImportTableEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize);
+#include <unordered_set>
 
 class GenericInjector
 {
 public:
 	GenericInjector() = default;
-	virtual ~GenericInjector() = default;
+	virtual ~GenericInjector();
 
-	void Init(HMODULE hDll)
-	{
-		m_hDll = hDll;
-		SetInstance();
-		OnLoad();
-	}
-
-	void Uninit()
-	{
-		OnUnload();
-	}
+	void Init(HMODULE hDll);
+	void Uninit();
 
 	void SetInstance(LPCTSTR lpModuleName = NULL) noexcept
 	{
@@ -67,7 +57,7 @@ public:
 		return InjectFunctionPointer<FunctionPrototype>(tPaser.GetImportFunctionAddress(DllName, Index));
 	}
 
-	// Only tested on Visual Studio
+	// Only tested on Visual Studio 2015
 	template <typename FunctionPrototype>
 	FunctionInjector<FunctionPrototype>* InjectVirtualTable(LPVOID pObject, DWORD dwIndex)
 	{
@@ -78,52 +68,64 @@ protected:
 	virtual void OnLoad() = 0;
 	virtual void OnUnload() = 0;
 
+protected:
+	static void InjectPointer(LPDWORD lpAddr, DWORD dwPointer);
+
+	// Cannot call this in hooking function because unhooking will delete the injector
+	void UnhookInjector(DWORD FunctionAddr);
+
 private:
 	HMODULE m_hDll, m_hInstance;
 	std::unique_ptr<PEPaser> m_pPEPaser;
-	std::unordered_map<DWORD, FunctionInjectorBase*> m_InjectorMap;
+	std::unordered_map<DWORD, std::pair<std::unordered_set<LPDWORD>, std::unique_ptr<FunctionInjectorBase>>> m_InjectorMap;
 
-	// TODO: Free injectors safely
-	// ¡üThis is no necessary now
+	static byte* GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept;
+	static byte* GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept;
+
 	template <typename FunctionPrototype>
-	FunctionInjector<FunctionPrototype>* AllocInjector(DWORD FunctionAddr)
+	FunctionInjector<FunctionPrototype>* AllocInjector(LPDWORD FunctionAddr)
 	{
-		auto tItea = m_InjectorMap.find(FunctionAddr);
+		auto tItea = m_InjectorMap.find(*FunctionAddr);
 		if (tItea == m_InjectorMap.end())
 		{
 			auto tRet = new FunctionInjector<FunctionPrototype>;
-			m_InjectorMap[FunctionAddr] = tRet;
+			auto& InjectorPair = m_InjectorMap[*FunctionAddr];
+			InjectorPair.first.insert(FunctionAddr);
+			InjectorPair.second.reset(static_cast<FunctionInjectorBase*>(tRet));
+
 			return tRet;
 		}
 
-		if (!tItea->second)
+		if (!tItea->second.second)
 		{
 			auto tRet = new FunctionInjector<FunctionPrototype>;
-			tItea->second = tRet;
+			tItea->second.first.insert(FunctionAddr);
+			tItea->second.second.reset(static_cast<FunctionInjectorBase*>(tRet));
+
 			return tRet;
 		}
 
-		return dynamic_cast<FunctionInjector<FunctionPrototype>*>(tItea->second);
+		return dynamic_cast<FunctionInjector<FunctionPrototype>*>(tItea->second.second.get());
 	}
 	
 	template <typename FunctionPrototype>
 	void InjectStdCallFunction(HINSTANCE hInstance, FunctionInjector<FunctionPrototype>* pInjector, LPDWORD lpAddr)
 	{
-		byte* pInjectImportTableEntry = GenerateInjectImportTableEntry(hInstance, pInjector, GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::ArgType::Size);
-
-		DWORD tOldProtect;
-		if (!VirtualProtect(lpAddr, sizeof(LPVOID), PAGE_READWRITE, &tOldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of inject function");
-		}
+		byte* pInjectStdcallEntry = GenerateInjectStdcallEntry(hInstance, pInjector, GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::ArgType::Size);
 
 		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
 		pInjector->m_ReplacedFunc.second = nullptr;
-		*lpAddr = reinterpret_cast<DWORD>(pInjectImportTableEntry);
-		if (!VirtualProtect(lpAddr, sizeof(LPVOID), tOldProtect, &tOldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of inject function");
-		}
+		InjectPointer(lpAddr, reinterpret_cast<DWORD>(pInjectStdcallEntry));
+	}
+
+	template <typename FunctionPrototype>
+	void InjectCdeclFunction(HINSTANCE hInstance, FunctionInjector<FunctionPrototype>* pInjector, LPDWORD lpAddr)
+	{
+		byte* pInjectCdeclEntry = GenerateInjectCdeclEntry(hInstance, pInjector, GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::ArgType::Size);
+
+		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
+		pInjector->m_ReplacedFunc.second = nullptr;
+		InjectPointer(lpAddr, reinterpret_cast<DWORD>(pInjectCdeclEntry));
 	}
 
 	template <typename FunctionPrototype>
@@ -134,41 +136,48 @@ private:
 			throw std::invalid_argument("lpAddr or address which lpAddr points to should not be a nullptr.");
 		}
 
-		auto pInjector = AllocInjector<FunctionPrototype>(*lpAddr);
+		auto pInjector = AllocInjector<FunctionPrototype>(lpAddr);
+		if (!pInjector)
+		{
+			throw std::runtime_error("Failed to alloc injector.");
+		}
 
-		// Now we can only inject stdcall function
 		switch (GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::CallingConvention)
 		{
-		case CallingConventionEnum::Thiscall:
 		case CallingConventionEnum::Stdcall:
+		case CallingConventionEnum::Thiscall:
+		case CallingConventionEnum::Fastcall:
 			InjectStdCallFunction(GetInstance(), pInjector, lpAddr);
 			break;
 		case CallingConventionEnum::Cdecl:
-			break;
-		case CallingConventionEnum::Fastcall:
+			InjectCdeclFunction(GetInstance(), pInjector, lpAddr);
 			break;
 		default:
-			break;
+			throw std::invalid_argument("Unknown calling convention.");
 		}
 
 		return pInjector;
 	}
 };
 
-#define InitInjector(Injector) \
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)\
-{\
-	switch (ul_reason_for_call)\
+// define InitInjector before including GenericInjector.h if you need another DllMain
+// why you want to do that?
+#ifndef InitInjector
+#	define InitInjector(Injector) \
+	BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)\
 	{\
-	case DLL_PROCESS_ATTACH:\
-		(Injector).Init(hModule);\
-		break;\
-	case DLL_THREAD_ATTACH:\
-	case DLL_THREAD_DETACH:\
-		break;\
-	case DLL_PROCESS_DETACH:\
-		(Injector).Uninit();\
-		break;\
-	}\
-	return TRUE;\
-}
+		switch (ul_reason_for_call)\
+		{\
+		case DLL_PROCESS_ATTACH:\
+			(Injector).Init(hModule);\
+			break;\
+		case DLL_THREAD_ATTACH:\
+		case DLL_THREAD_DETACH:\
+			break;\
+		case DLL_PROCESS_DETACH:\
+			(Injector).Uninit();\
+			break;\
+		}\
+		return TRUE;\
+	}
+#endif

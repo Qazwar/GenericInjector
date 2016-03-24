@@ -1,7 +1,8 @@
-#include "stdafx.h"
 #include <GenericInjector.h>
 #include <iostream>
 #include <sstream>
+#include <Windows.h>
+#include <tchar.h>
 
 // Extends from GenericInjector to design your own injector
 class InjectorTest final
@@ -12,20 +13,28 @@ public:
 	{
 	}
 
-	~InjectorTest() override
+	~InjectorTest()
 	{
 	}
 
 	__declspec(noinline)
-	static void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, double uType, int iReturnedValue)
+	static void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, double uType, int ReturnedValue)
 	{
 		// Output the argument of our injected function MessageBoxW passed by origin program
-		std::wcout << hWnd << std::endl << lpText << std::endl << lpCaption << std::endl << uType << std::endl << iReturnedValue << std::endl;
+		std::wcout << hWnd << std::endl << lpText << std::endl << lpCaption << std::endl << uType << std::endl << ReturnedValue << std::endl;
 		// You can modify the returned value by simply assigning it
 		// Turn off the optimization if you are using release configuration
-		iReturnedValue = IDYES;
+		ReturnedValue = IDYES;
 
 		// But you cannot modify arguments, lol
+	}
+
+	__declspec(noinline)
+	static void PutC(int Code, int ReturnValue)
+	{
+		TCHAR tStr[2] {0};
+		tStr[0] = static_cast<TCHAR>(Code);
+		MessageBox(NULL, _T("Hooked"), tStr, MB_OK);
 	}
 
 	void OnLoad() override
@@ -37,6 +46,9 @@ public:
 			std::cout << reinterpret_cast<LPVOID>(*pFunc) << std::endl << MessageBoxW << std::endl << std::endl;
 			auto pInjector = InjectImportTable<decltype(&MessageBoxW)>(_T("user32.dll"), _T("MessageBoxW"));
 			pInjector->RegisterAfter(TestHook);
+			auto pInjector2 = InjectImportTable<decltype(&putchar)>(_T("ucrtbased.dll"), _T("putchar"));
+			pInjector2->RegisterAfter(PutC);
+			pInjector2->Replace(nullptr);
 		}
 		catch (std::system_error& sysex)
 		{
@@ -70,5 +82,4 @@ private:
 };
 
 // Implement our injector, you can also use global variant
-// DO NOT TRY TO IMPLEMENT OTHER DllMain!
 InitInjector(InjectorTest::GetInjectorInstance())
