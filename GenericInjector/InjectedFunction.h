@@ -46,7 +46,7 @@ protected:
 };
 
 template <typename Func>
-class InjectedFunction
+class InjectedFunction final
 	: public Functor
 {
 public:
@@ -72,10 +72,9 @@ public:
 		return FunctionInfo::HasVariableArgument;
 	}
 
-	// <FIXME>: Use formal solution
 	LPVOID GetFunctionPointer() const noexcept override
 	{
-		return *reinterpret_cast<void* const*>(reinterpret_cast<const void*>(&m_pFunc));
+		return m_RawPointer;
 	}
 
 	LPVOID GetObjectPointer() const noexcept override
@@ -109,7 +108,12 @@ public:
 	}
 
 private:
-	Func m_pFunc;
+	union
+	{
+		Func m_pFunc;
+		void* m_RawPointer;
+	};
+	
 	typename FunctionInfo::ClassType* m_pObject;
 };
 
@@ -137,6 +141,15 @@ struct GetCastArgsStruct
 	typedef typename GetCastArgsStructHelper<T1::Count >= T2::Count, T1, T2>::Type Type;
 };
 
+template <typename... Arg>
+struct GetCastArgsStruct<TypeSequence<Arg...>, TypeSequence<Arg...>>
+{
+	struct Type
+	{
+		static constexpr Functor::CastArgFunc Execute = nullptr;
+	};
+};
+
 struct FunctionInjectorBase
 {
 	virtual ~FunctionInjectorBase() = default;
@@ -150,7 +163,7 @@ class FunctionInjector final
 {
 	friend class GenericInjector;
 public:
-	typedef GetFunctionAnalysis<FunctionPrototype> FunctionAnalysis;
+	typedef typename GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis FunctionAnalysis;
 
 	FunctionInjector() = default;
 
@@ -166,7 +179,7 @@ public:
 	template <typename Func>
 	LPVOID Replace(Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		//static_assert(SequenceConvertible<Func2Arg, Func1Arg>::value, "Arguments between original and provided function are impatient.");
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
@@ -195,7 +208,7 @@ public:
 	template <typename Func>
 	void RegisterBefore(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
 		m_BeforeFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
@@ -210,7 +223,7 @@ public:
 	template <typename Func>
 	void RegisterAfter(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::FunctionAnalysis::ClassType>, typename FunctionAnalysis::FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
 		m_AfterFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
@@ -220,7 +233,7 @@ public:
 	{
 		DWORD tReturnValue = 0ul;
 		bool tReceiveReturnedValue;
-		constexpr auto tArgSize = FunctionAnalysis::FunctionAnalysis::ArgType::AlignedSize;
+		constexpr auto tArgSize = FunctionAnalysis::ArgType::AlignedSize;
 
 		for (auto& Func : m_BeforeFunc)
 		{
@@ -229,16 +242,12 @@ public:
 		if (m_ReplacedFunc.first)
 		{
 			tReturnValue = m_ReplacedFunc.first->Call(m_ReplacedFunc.second, lpStackTop, &tReturnValue, tArgSize, false);
+			__asm mov tReturnValue, eax;
 		}
-		else
-		{
-			__asm xor eax, eax;
-		}
-		__asm mov tReturnValue, eax;
 		
 		for (auto& Func : m_AfterFunc)
 		{
-			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::FunctionAnalysis::ArgType::Count + 1;
+			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::ArgType::Count + 1;
 			tReturnValue = Func.first->Call(Func.second, lpStackTop, &tReturnValue, tArgSize, tReceiveReturnedValue);
 		}
 		__asm mov eax, tReturnValue;

@@ -10,15 +10,9 @@ public:
 	GenericInjector() = default;
 	virtual ~GenericInjector();
 
-	void Init(HMODULE hDll);
+	void Init(HMODULE hDll, LPCTSTR lpModuleName = NULL);
+	void Init(HMODULE hDll, HINSTANCE hInstance);
 	void Uninit();
-
-	void SetInstance(LPCTSTR lpModuleName = NULL) noexcept
-	{
-		SetInstance(GetModuleHandle(lpModuleName));
-	}
-
-	void SetInstance(HMODULE hModule) noexcept;
 
 	HMODULE GetInstance() const noexcept
 	{
@@ -28,6 +22,11 @@ public:
 	HMODULE GetModule() const noexcept
 	{
 		return m_hDll;
+	}
+
+	HANDLE GetProcess() const noexcept
+	{
+		return m_hProcess;
 	}
 
 	PEPaser const& GetPEPaser();
@@ -69,52 +68,69 @@ protected:
 	virtual void OnUnload() = 0;
 
 protected:
-	static void InjectPointer(LPDWORD lpAddr, DWORD dwPointer);
+	void InjectPointer(LPDWORD lpAddr, DWORD dwPointer) const;
+	static void InjectPointer(HINSTANCE hInstance, LPDWORD lpAddr, DWORD dwPointer);
 
 	// Cannot call this in hooking function because unhooking will delete the injector
 	void UnhookInjector(DWORD FunctionAddr);
 
 	template <typename Container>
-	static void GetCode(HMODULE hInstance, DWORD dwOffset, DWORD dwSize, Container& container)
+	void GetCode(HMODULE hInstance, DWORD dwOffset, DWORD dwSize, Container& container)
 	{
 		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
 		DWORD oldProtect;
-		if (!VirtualProtect(pCode, dwSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+		if (!VirtualProtectEx(GetProcess(), pCode, dwSize, PAGE_EXECUTE_READWRITE, &oldProtect))
 		{
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 		}
 		container.insert(container.end(), pCode, pCode + dwSize);
-		if (!VirtualProtect(pCode, dwSize, oldProtect, &oldProtect))
+		if (!VirtualProtectEx(GetProcess(), pCode, dwSize, oldProtect, &oldProtect))
 		{
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 		}
 	}
 
 	template <size_t Size>
-	static void GetCode(HMODULE hInstance, DWORD dwOffset, byte (&Buffer)[Size])
+	void GetCode(HMODULE hInstance, DWORD dwOffset, byte (&Buffer)[Size])
 	{
 		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
 		DWORD oldProtect;
-		if (!VirtualProtect(pCode, Size, PAGE_EXECUTE_READWRITE, &oldProtect))
+		if (!VirtualProtectEx(GetProcess(), pCode, Size, PAGE_EXECUTE_READWRITE, &oldProtect))
 		{
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 		}
 		memcpy_s(Buffer, Size, pCode, Size);
-		if (!VirtualProtect(pCode, Size, oldProtect, &oldProtect))
+		if (!VirtualProtectEx(GetProcess(), pCode, Size, oldProtect, &oldProtect))
 		{
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 		}
 	}
 
-	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+	template <size_t Size>
+	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte(&lpCode)[Size])
+	{
+		InjectCode(hInstance, dwDestOffset, dwDestSize, lpCode, Size);
+	}
+	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true);
 
 private:
+	bool m_bInit;
 	HMODULE m_hDll, m_hInstance;
+	HANDLE m_hProcess;
 	std::unique_ptr<PEPaser> m_pPEPaser;
 	std::unordered_map<DWORD, std::pair<std::unordered_set<LPDWORD>, std::unique_ptr<FunctionInjectorBase>>> m_InjectorMap;
 
-	static byte* GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept;
-	static byte* GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept;
+	void SetInstance(LPCTSTR lpModuleName = NULL) noexcept
+	{
+		SetInstance(GetModuleHandle(lpModuleName));
+	}
+
+	void SetInstance(HMODULE hModule) noexcept;
+	void SetProcess(HANDLE hProcess = INVALID_HANDLE_VALUE) noexcept;
+
+	static byte* GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize);
+	static byte* GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize);
 
 	template <typename FunctionPrototype>
 	FunctionInjector<FunctionPrototype>* AllocInjector(LPDWORD FunctionAddr)
@@ -194,8 +210,6 @@ private:
 	}
 };
 
-// define InitInjector before including GenericInjector.h if you need another DllMain
-// why you want to do that?
 #ifndef InitInjector
 #	define InitInjector(Injector) \
 	BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)\

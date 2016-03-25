@@ -45,9 +45,14 @@ namespace
 		pInjector->Execute(pStackTop);
 	}
 
-	byte* AllocCode(size_t szCode) noexcept
+	byte* AllocCode(size_t szCode, HANDLE hProcess = INVALID_HANDLE_VALUE)
 	{
-		return static_cast<byte*>(VirtualAlloc(NULL, szCode, MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+		auto pCode = static_cast<byte*>(VirtualAllocEx(hProcess == INVALID_HANDLE_VALUE ? GetCurrentProcess() : hProcess, NULL, szCode, MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+		if (!pCode)
+		{
+			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot alloc code.");
+		}
+		return pCode;
 	}
 
 	void FlushCode(HINSTANCE hInstance, const byte* pCode, size_t szCode) noexcept
@@ -64,16 +69,34 @@ GenericInjector::~GenericInjector()
 	}
 }
 
-void GenericInjector::Init(HMODULE hDll)
+void GenericInjector::Init(HMODULE hDll, LPCTSTR lpModuleName)
 {
+	Init(hDll, GetModuleHandle(lpModuleName));
+}
+
+void GenericInjector::Init(HMODULE hDll, HINSTANCE hInstance)
+{
+	if (m_bInit)
+	{
+		throw std::runtime_error("Injector already initialized.");
+	}
+
 	m_hDll = hDll;
-	SetInstance();
+	SetProcess();
+	SetInstance(hInstance);
 	OnLoad();
+	m_bInit = true;
 }
 
 void GenericInjector::Uninit()
 {
+	if (!m_bInit)
+	{
+		throw std::runtime_error("Injector have not initialized.");
+	}
+
 	OnUnload();
+	m_bInit = false;
 }
 
 void GenericInjector::SetInstance(HMODULE hModule) noexcept
@@ -83,6 +106,11 @@ void GenericInjector::SetInstance(HMODULE hModule) noexcept
 		m_pPEPaser.reset();
 		m_hInstance = hModule;
 	}
+}
+
+void GenericInjector::SetProcess(HANDLE hProcess) noexcept
+{
+	m_hProcess = hProcess == INVALID_HANDLE_VALUE ? GetCurrentProcess() : hProcess;
 }
 
 PEPaser const& GenericInjector::GetPEPaser()
@@ -95,7 +123,12 @@ PEPaser const& GenericInjector::GetPEPaser()
 	return *m_pPEPaser;
 }
 
-void GenericInjector::InjectPointer(LPDWORD lpAddr, DWORD dwPointer)
+void GenericInjector::InjectPointer(LPDWORD lpAddr, DWORD dwPointer) const
+{
+	InjectPointer(GetInstance(), lpAddr, dwPointer);
+}
+
+void GenericInjector::InjectPointer(HINSTANCE hInstance, LPDWORD lpAddr, DWORD dwPointer)
 {
 	DWORD tOldProtect;
 	if (!VirtualProtect(lpAddr, sizeof(LPVOID), PAGE_READWRITE, &tOldProtect))
@@ -125,7 +158,7 @@ void GenericInjector::UnhookInjector(DWORD FunctionAddr)
 	}
 }
 
-void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
+void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
 {
 	if (dwDestSize < sizeof JmpTemplate)
 	{
@@ -154,20 +187,45 @@ void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 	}
 }
 
-byte* GenericInjector::GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept
+void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop)
+{
+	if (dwDestSize < dwCodeSize)
+	{
+		throw std::invalid_argument("Size of code is too big, consider using InjectCode.");
+	}
+
+	byte* pDest = reinterpret_cast<byte*>(hInstance) + dwDestOffset;
+	DWORD oldProtect;
+	if (!VirtualProtect(pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+	}
+	memcpy_s(pDest, dwDestSize, lpCode, dwCodeSize);
+	if (dwDestSize > dwCodeSize && bFillNop)
+	{
+		// NOP: 0x90
+		memset(pDest + dwCodeSize, 0x90, dwDestSize - dwCodeSize);
+	}
+	if (!VirtualProtect(pDest, dwDestSize, oldProtect, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+	}
+}
+
+byte* GenericInjector::GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize)
 {
 	byte* pInjectStdcallEntry = AllocCode(sizeof InjectStdcallTemplate);
 	memcpy_s(pInjectStdcallEntry, sizeof InjectStdcallTemplate, InjectStdcallTemplate, sizeof InjectStdcallTemplate);
 	*reinterpret_cast<LPVOID*>(pInjectStdcallEntry + 7) = pInjector;
 	*reinterpret_cast<LPVOID*>(pInjectStdcallEntry + 12) = &InjectorHelper;
 	*reinterpret_cast<WORD*>(pInjectStdcallEntry + 23) = static_cast<WORD>(dwArgSize);
-
+	
 	FlushCode(hInstance, pInjectStdcallEntry, sizeof InjectStdcallTemplate);
 
 	return pInjectStdcallEntry;
 }
 
-byte* GenericInjector::GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize) noexcept
+byte* GenericInjector::GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInjector, DWORD dwArgSize)
 {
 	byte* pInjectCdeclEntry = AllocCode(sizeof InjectCdeclTemplate);
 	memcpy_s(pInjectCdeclEntry, sizeof InjectCdeclTemplate, InjectCdeclTemplate, sizeof InjectCdeclTemplate);

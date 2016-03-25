@@ -18,10 +18,11 @@ public:
 	}
 
 	__declspec(noinline)
-	static void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, double uType, int ReturnedValue)
+	void TestHook(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, double uType, int ReturnedValue)
 	{
 		// Output the argument of our injected function MessageBoxW passed by origin program
 		std::wcout << hWnd << std::endl << lpText << std::endl << lpCaption << std::endl << uType << std::endl << ReturnedValue << std::endl;
+		GetPEPaser().GetImportFunctionAddress(_T(""), _T(""));
 		// You can modify the returned value by simply assigning it
 		// Turn off the optimization if you are using release configuration
 		ReturnedValue = IDYES;
@@ -45,15 +46,16 @@ public:
 			auto pFunc = GetPEPaser().GetImportFunctionAddress(_T("user32.dll"), _T("MessageBoxW"));
 			std::cout << reinterpret_cast<LPVOID>(*pFunc) << std::endl << MessageBoxW << std::endl << std::endl;
 			auto pInjector = InjectImportTable<decltype(&MessageBoxW)>(_T("user32.dll"), _T("MessageBoxW"));
-			pInjector->RegisterAfter(TestHook);
+			pInjector->RegisterAfter(this, &InjectorTest::TestHook);
 			auto pInjector2 = InjectImportTable<decltype(&putchar)>(_T("ucrtbased.dll"), _T("putchar"));
 			pInjector2->RegisterAfter(PutC);
 			pInjector2->Replace(nullptr);
 
 			// nop
 			//byte tmpCode[]{ 0x90, };
-			// NOTE: Only usable on my machine, if you want to test it you should get the rva of the code you want to modify and replace arguments.
-			//ModifyCode(GetInstance(), 0x16501, 0x47, tmpCode, 1);
+			// NOTE: Only usable on my machine, if you want to test it you should get the rva of the code you want to modify and replace arguments yourself.
+			//InjectCode(GetInstance(), 0x16561, 0x47, tmpCode, 1);
+			//ModifyCode(GetInstance(), 0x16561, 0x47, tmpCode, 1);
 		}
 		catch (std::system_error& sysex)
 		{
@@ -87,4 +89,5 @@ private:
 };
 
 // Implement our injector, you can also use global variant
+// If you don't use GenericInjetor in a dll project, you don't need to use InitInjector but you need to implement your own init function
 InitInjector(InjectorTest::GetInjectorInstance())

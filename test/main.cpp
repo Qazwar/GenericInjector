@@ -28,7 +28,12 @@ bool CreateProcessWithDll(LPCTSTR lpExePath, LPCTSTR lpDllPath)
 		return false;
 	}
 
-	LPTHREAD_START_ROUTINE lpRoutine = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(GetModuleHandle(_T("Kernel32")),
+	auto hModule = GetModuleHandle(_T("Kernel32"));
+	if (!hModule)
+	{
+		return false;
+	}
+	LPTHREAD_START_ROUTINE lpRoutine = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(hModule,
 #ifdef UNICODE
 		"LoadLibraryW"
 #else
@@ -36,12 +41,17 @@ bool CreateProcessWithDll(LPCTSTR lpExePath, LPCTSTR lpDllPath)
 #endif
 		));
 
+	if (!lpRoutine)
+	{
+		return false;
+	}
+	
 	HANDLE hThread = CreateRemoteThread(pi.hProcess, NULL, 0u,
 		lpRoutine,
 		pRemoteAddr, NULL, NULL
 		);
 
-	if (hThread == INVALID_HANDLE_VALUE)
+	if (hThread == INVALID_HANDLE_VALUE || !hThread)
 	{
 		return false;
 	}

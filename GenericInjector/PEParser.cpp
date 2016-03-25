@@ -41,7 +41,7 @@ LPDWORD PEPaser::GetImportFunctionAddress(tstring const & DllName, DWORD Index) 
 
 void PEPaser::init(const byte* pPEData)
 {
-	const byte* pCurrentPointer = pPEData;
+	auto pCurrentPointer = pPEData;
 	IMAGE_DOS_HEADER DosHeader;
 	memcpy_s(&DosHeader, sizeof(IMAGE_DOS_HEADER), pCurrentPointer, sizeof(IMAGE_DOS_HEADER));
 	pCurrentPointer = pPEData + DosHeader.e_lfanew;

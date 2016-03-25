@@ -40,7 +40,7 @@ struct TypeSequence<T, _Rest...>
 	{
 		Count = 1 + sizeof...(_Rest),
 		Size = sizeof(Type) + Rest::Size,
-		AlignedSize = calc_align(sizeof(Type), DefaultAlignBase) + Rest::AlignedSize,
+		AlignedSize = calc_align(sizeof(Type)) + Rest::AlignedSize,
 	};
 };
 
