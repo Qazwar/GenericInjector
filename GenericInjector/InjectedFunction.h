@@ -39,10 +39,10 @@ struct Functor
 	virtual LPVOID GetObjectPointer() const noexcept = 0;
 	virtual DWORD GetArgSize() const noexcept = 0;
 	virtual DWORD GetArgCount() const noexcept = 0;
-	virtual DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) = 0;
+	virtual DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPVOID pObject, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) = 0;
 
 protected:
-	DWORD CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTop, LPVOID pArgs, LPDWORD lpReturnValue, DWORD ArgSize, DWORD ActualArgSize, bool ReceiveReturnedValue) const;
+	DWORD CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTop, LPVOID pArgs, LPVOID pOriginObject, LPDWORD lpReturnValue, DWORD ArgSize, DWORD ActualArgSize, bool ReceiveReturnedValue) const;
 };
 
 template <typename Func>
@@ -92,19 +92,25 @@ public:
 		return FunctionInfo::ArgType::Count;
 	}
 
-	DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) override
+	DWORD Call(CastArgFunc pCastArgFunc, LPVOID pStackTop, LPVOID pObject, LPDWORD lpReturnValue, DWORD ArgSize, bool ReceiveReturnedValue) override
 	{
 		constexpr uint tmpArgSize = FunctionInfo::ArgType::AlignedSize;
+		// may include this
 		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - calc_align(sizeof(typename GetType<FunctionInfo::ArgType::Count - 1, typename FunctionInfo::ArgType>::Type)) : tmpArgSize;
 		byte tArg[tmpArgSize];
 
 		if (pCastArgFunc)
 		{
 			pCastArgFunc(static_cast<const byte*>(pStackTop), tArg);
-			return CallImpl(FunctionInfo::CallingConvention, pStackTop, tArg, lpReturnValue, ArgSize, ActualArgSize, ReceiveReturnedValue);
+			return CallImpl(FunctionInfo::CallingConvention, pStackTop, tArg, pObject, lpReturnValue, ArgSize, ActualArgSize, ReceiveReturnedValue);
 		}
 
-		return CallImpl(FunctionInfo::CallingConvention, pStackTop, nullptr, lpReturnValue, ArgSize, ActualArgSize, ReceiveReturnedValue);
+		if (ReceiveReturnedValue)
+		{
+			// Error
+			return 0ul;
+		}
+		return CallImpl(FunctionInfo::CallingConvention, pStackTop, nullptr, pObject, lpReturnValue, ArgSize, ActualArgSize, false);
 	}
 
 private:
@@ -150,11 +156,23 @@ struct GetCastArgsStruct<TypeSequence<Arg...>, TypeSequence<Arg...>>
 	};
 };
 
+template <bool Condition, typename T>
+struct PopFrontIf
+{
+	typedef typename GetType<1u, T>::TargetSequence Type;
+};
+
+template <typename T>
+struct PopFrontIf<false, T>
+{
+	typedef T Type;
+};
+
 struct FunctionInjectorBase
 {
 	virtual ~FunctionInjectorBase() = default;
 
-	virtual void Execute(LPVOID lpStackTop) = 0;
+	virtual void Execute(DWORD dwECX, LPVOID lpStackTop) = 0;
 };
 
 template <typename FunctionPrototype>
@@ -172,6 +190,7 @@ public:
 	FunctionInjector(Func pFunc)
 		: m_ReplacedFunc(std::move(std::make_unique<InjectedFunction<Func>>(pFunc)))
 	{
+		m_OriginalFunction.OriginalFunctionPointer = pFunc;
 	}
 
 	~FunctionInjector() = default;
@@ -179,14 +198,16 @@ public:
 	template <typename Func>
 	LPVOID Replace(Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<std::is_same<typename FunctionAnalysis::ClassType, void>::value, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
-		//static_assert(SequenceConvertible<Func2Arg, Func1Arg>::value, "Arguments between original and provided function are impatient.");
-		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
+		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
+		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
+		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
+		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
 
 		auto tRet = m_ReplacedFunc.first ? m_ReplacedFunc.first->GetFunctionPointer() : nullptr;
 		m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<Func>>(pFunc));
-		m_ReplacedFunc.second = GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute;
+		m_ReplacedFunc.second = GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute;
 
 		return tRet;
 	}
@@ -208,10 +229,13 @@ public:
 	template <typename Func>
 	void RegisterBefore(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<std::is_same<typename FunctionAnalysis::ClassType, void>::value, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
-		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_BeforeFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
+		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
+		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
+		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
+		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
+		m_BeforeFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute));
 	}
 
 	template <typename Func>
@@ -223,37 +247,71 @@ public:
 	template <typename Func>
 	void RegisterAfter(typename GetFunctionAnalysis<Func>::FunctionAnalysis::ClassType* pObject, Func pFunc)
 	{
-		typedef std::conditional_t<FunctionAnalysis::CallingConvention != CallingConventionEnum::Thiscall, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
+		typedef std::conditional_t<std::is_same<typename FunctionAnalysis::ClassType, void>::value, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
-		static_assert(Func2Arg::Count <= Func1Arg::Count + 1u, "Too many arguments.");
-		m_AfterFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<Func1Arg, Func2Arg>::Type::Execute));
+		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
+		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
+		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
+		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
+		m_AfterFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute));
 	}
 
-	void Execute(LPVOID lpStackTop) override
+	void Execute(DWORD dwECX, LPVOID lpStackTop) override
 	{
+		LPVOID pObject = nullptr;
+		if (!std::is_same<typename FunctionAnalysis::ClassType, void>::value)
+		{
+			if (FunctionAnalysis::CallingConvention == CallingConventionEnum::Thiscall)
+			{
+				pObject = reinterpret_cast<LPVOID>(dwECX);
+			}
+			else
+			{
+				pObject = *reinterpret_cast<LPVOID*>(lpStackTop);
+				lpStackTop = static_cast<byte*>(lpStackTop) + sizeof(LPVOID);
+			}
+
+			if (!pObject)
+			{
+				// Error
+				__asm xor eax, eax;
+				return;
+			}
+		}
+
 		DWORD tReturnValue = 0ul;
 		bool tReceiveReturnedValue;
 		constexpr auto tArgSize = FunctionAnalysis::ArgType::AlignedSize;
 
 		for (auto& Func : m_BeforeFunc)
 		{
-			Func.first->Call(Func.second, lpStackTop, &tReturnValue, tArgSize, false);
+			Func.first->Call(Func.second, lpStackTop, pObject, &tReturnValue, tArgSize, false);
 		}
 		if (m_ReplacedFunc.first)
 		{
-			tReturnValue = m_ReplacedFunc.first->Call(m_ReplacedFunc.second, lpStackTop, &tReturnValue, tArgSize, false);
-			__asm mov tReturnValue, eax;
+			tReturnValue = m_ReplacedFunc.first->Call(m_ReplacedFunc.second, lpStackTop, pObject, &tReturnValue, tArgSize, false);
 		}
+		else
+		{
+			__asm xor eax, eax;
+		}
+		__asm mov tReturnValue, eax;
 		
 		for (auto& Func : m_AfterFunc)
 		{
-			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::ArgType::Count + 1;
-			tReturnValue = Func.first->Call(Func.second, lpStackTop, &tReturnValue, tArgSize, tReceiveReturnedValue);
+			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::ArgType::Count + (std::is_same<typename FunctionAnalysis::ClassType, void>::value ? 1 : 2);
+			tReturnValue = Func.first->Call(Func.second, lpStackTop, pObject, &tReturnValue, tArgSize, tReceiveReturnedValue);
 		}
 		__asm mov eax, tReturnValue;
 	}
 
 private:
+	union
+	{
+		FunctionPrototype OriginalFunctionPointer;
+		LPVOID RawPointer;
+	} m_OriginalFunction;
+
 	std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc> m_ReplacedFunc;
 	std::vector<std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc>> m_BeforeFunc;
 	std::vector<std::pair<std::unique_ptr<Functor>, Functor::CastArgFunc>> m_AfterFunc;

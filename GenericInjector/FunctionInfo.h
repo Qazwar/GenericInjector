@@ -155,12 +155,13 @@ enum class CallingConventionEnum : byte
 template <CallingConventionEnum _CallingConvention, bool _HasVariableArgument, typename _ClassType, typename Ret, typename... Arg>
 struct AnalysisFunction
 {
-	static_assert(!_HasVariableArgument || _CallingConvention == CallingConventionEnum::Cdecl || _CallingConvention == CallingConventionEnum::Thiscall, "Only cdecl or thiscall function can have variable argument");
+	static_assert(!_HasVariableArgument || _CallingConvention == CallingConventionEnum::Cdecl, "Only cdecl function can have variable argument.");
+	static_assert(_CallingConvention != CallingConventionEnum::Thiscall || !std::is_same<_ClassType, void>::value, "Thiscall function should have a classtype.");
 
 	static constexpr CallingConventionEnum CallingConvention = _CallingConvention;
 	static constexpr bool HasVariableArgument = _HasVariableArgument;
 
-	typedef typename std::conditional<CallingConvention == CallingConventionEnum::Thiscall, _ClassType, void>::type ClassType;
+	typedef _ClassType ClassType;
 
 	typedef Ret ReturnType;
 	typedef TypeSequence<Arg...> ArgType;
@@ -205,17 +206,31 @@ struct GetFunctionAnalysis<Ret(__thiscall ClassType::*)(Arg...)const>
 };
 
 template <typename ClassType, typename Ret, typename... Arg>
-struct GetFunctionAnalysis<Ret(ClassType::*)(Arg..., ...)>
+struct GetFunctionAnalysis<Ret(__stdcall ClassType::*)(Arg...)>
 {
-	typedef AnalysisFunction<CallingConventionEnum::Thiscall, true, ClassType, Ret, Arg...> FunctionAnalysis;
-	typedef Ret(ClassType::* OriginalFunction)(Arg..., ...);
+	typedef AnalysisFunction<CallingConventionEnum::Stdcall, false, ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__stdcall ClassType::* OriginalFunction)(Arg...);
 };
 
 template <typename ClassType, typename Ret, typename... Arg>
-struct GetFunctionAnalysis<Ret(ClassType::*)(Arg..., ...)const>
+struct GetFunctionAnalysis<Ret(__stdcall ClassType::*)(Arg...)const>
 {
-	typedef AnalysisFunction<CallingConventionEnum::Thiscall, true, const ClassType, Ret, Arg...> FunctionAnalysis;
-	typedef Ret(ClassType::* OriginalFunction)(Arg..., ...)const;
+	typedef AnalysisFunction<CallingConventionEnum::Stdcall, false, const ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__stdcall ClassType::* OriginalFunction)(Arg...)const;
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__cdecl ClassType::*)(Arg..., ...)>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Cdecl, true, ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__cdecl ClassType::* OriginalFunction)(Arg..., ...);
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__cdecl ClassType::*)(Arg..., ...)const>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Cdecl, true, const ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__cdecl ClassType::* OriginalFunction)(Arg..., ...)const;
 };
 
 template <typename Ret, typename... Arg>

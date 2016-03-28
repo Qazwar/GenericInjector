@@ -45,9 +45,9 @@ public:
 			std::wcout.imbue(std::locale("", LC_CTYPE));
 			auto pFunc = GetPEPaser().GetImportFunctionAddress(_T("user32.dll"), _T("MessageBoxW"));
 			std::cout << reinterpret_cast<LPVOID>(*pFunc) << std::endl << MessageBoxW << std::endl << std::endl;
-			auto pInjector = InjectImportTable<decltype(&MessageBoxW)>(_T("user32.dll"), _T("MessageBoxW"));
+			auto pInjector = InjectImportTable<decltype(MessageBoxW)>(_T("user32.dll"), _T("MessageBoxW"));
 			pInjector->RegisterAfter(this, &InjectorTest::TestHook);
-			auto pInjector2 = InjectImportTable<decltype(&putchar)>(_T("ucrtbased.dll"), _T("putchar"));
+			auto pInjector2 = InjectImportTable<decltype(putchar)>(_T("ucrtbased.dll"), _T("putchar"));
 			pInjector2->RegisterAfter(PutC);
 			pInjector2->Replace(nullptr);
 

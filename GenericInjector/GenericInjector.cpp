@@ -9,14 +9,15 @@ namespace
 		0x53,								//push ebx
 		0x8D, 0x5C, 0x24, 0x08,				//lea ebx, [esp+8] // skip saved ebx and ret addr which is pushed by instruction call
 		0x56,								//push esi
-		0xBE, 0x00, 0x00, 0x00, 0x00,		//mov esi, 0x00000000(+7)
-		0xB8, 0x00, 0x00, 0x00, 0x00,		//mov eax, 0x00000000(+C)
+		0xBE, 0x00, 0x00, 0x00, 0x00,		//mov esi, 0x00000000(+0x7)
+		0xB8, 0x00, 0x00, 0x00, 0x00,		//mov eax, 0x00000000(+0xC)
 		0x53,								//push ebx
+		0x51,								//push ecx
 		0x56,								//push esi
 		0xFF, 0xD0,							//call eax
 		0x5E,								//pop esi
 		0x5B,								//pop ebx
-		0xC2, 0x00, 0x00,					//ret 0(+17) // clear the stack and return
+		0xC2, 0x00, 0x00,					//ret 0(+0x18) // clear the stack and return
 	};
 
 	const byte InjectCdeclTemplate[]
@@ -27,6 +28,7 @@ namespace
 		0xBE, 0x00, 0x00, 0x00, 0x00,		//mov esi, 0x00000000(+7)
 		0xB8, 0x00, 0x00, 0x00, 0x00,		//mov eax, 0x00000000(+C)
 		0x53,								//push ebx
+		0x51,								//push ecx
 		0x56,								//push esi
 		0xFF, 0xD0,							//call eax
 		0x5E,								//pop esi
@@ -40,9 +42,9 @@ namespace
 	};
 
 	__declspec(noinline)
-	void __stdcall InjectorHelper(FunctionInjectorBase* pInjector, LPVOID pStackTop)
+	void __stdcall InjectorHelper(FunctionInjectorBase* pInjector, DWORD dwECX, LPVOID pStackTop)
 	{
-		pInjector->Execute(pStackTop);
+		pInjector->Execute(dwECX, pStackTop);
 	}
 
 	byte* AllocCode(size_t szCode, HANDLE hProcess = INVALID_HANDLE_VALUE)
@@ -218,7 +220,7 @@ byte* GenericInjector::GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pI
 	memcpy_s(pInjectStdcallEntry, sizeof InjectStdcallTemplate, InjectStdcallTemplate, sizeof InjectStdcallTemplate);
 	*reinterpret_cast<LPVOID*>(pInjectStdcallEntry + 7) = pInjector;
 	*reinterpret_cast<LPVOID*>(pInjectStdcallEntry + 12) = &InjectorHelper;
-	*reinterpret_cast<WORD*>(pInjectStdcallEntry + 23) = static_cast<WORD>(dwArgSize);
+	*reinterpret_cast<WORD*>(pInjectStdcallEntry + 24) = static_cast<WORD>(dwArgSize);
 	
 	FlushCode(hInstance, pInjectStdcallEntry, sizeof InjectStdcallTemplate);
 
@@ -235,4 +237,20 @@ byte* GenericInjector::GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInj
 	FlushCode(hInstance, pInjectCdeclEntry, sizeof InjectCdeclTemplate);
 
 	return pInjectCdeclEntry;
+}
+
+byte* GenericInjector::GenerateJmpCode(HINSTANCE hInstance, DWORD TargetOffset)
+{
+	byte* pJmpCode = AllocCode(sizeof JmpTemplate);
+	memcpy_s(pJmpCode, sizeof JmpTemplate, JmpTemplate, sizeof JmpTemplate);
+	*reinterpret_cast<DWORD*>(pJmpCode + 1) = TargetOffset;
+
+	FlushCode(hInstance, pJmpCode, sizeof JmpTemplate);
+
+	return pJmpCode;
+}
+
+byte* GenericInjector::GenerateJmpCode(HINSTANCE hInstance, DWORD From, DWORD To)
+{
+	return GenerateJmpCode(hInstance, To - From);
 }

@@ -32,7 +32,7 @@ public:
 	PEPaser const& GetPEPaser();
 
 	template <typename FunctionPrototype>
-	FunctionInjector<FunctionPrototype>* InjectImportTable(tstring const& DllName, tstring const& FuncName)
+	auto InjectImportTable(tstring const& DllName, tstring const& FuncName)
 	{
 		auto const& tPaser = GetPEPaser();
 		if (!tPaser.DllImported(DllName))
@@ -40,11 +40,11 @@ public:
 			throw std::invalid_argument("Cannot locate dll.");
 		}
 
-		return InjectFunctionPointer<FunctionPrototype>(tPaser.GetImportFunctionAddress(DllName, FuncName));
+		return InjectFunctionPointer<std::decay_t<FunctionPrototype>>(tPaser.GetImportFunctionAddress(DllName, FuncName));
 	}
 
 	template <typename FunctionPrototype>
-	FunctionInjector<FunctionPrototype>* InjectImportTable(tstring const& DllName, DWORD Index)
+	auto InjectImportTable(tstring const& DllName, DWORD Index)
 	{
 		auto const& tPaser = GetPEPaser();
 
@@ -53,14 +53,14 @@ public:
 			throw std::invalid_argument("Cannot locate dll.");
 		}
 
-		return InjectFunctionPointer<FunctionPrototype>(tPaser.GetImportFunctionAddress(DllName, Index));
+		return InjectFunctionPointer<std::decay_t<FunctionPrototype>>(tPaser.GetImportFunctionAddress(DllName, Index));
 	}
 
 	// Only tested on Visual Studio 2015
 	template <typename FunctionPrototype>
-	FunctionInjector<FunctionPrototype>* InjectVirtualTable(LPVOID pObject, DWORD dwIndex)
+	auto InjectVirtualTable(LPVOID pObject, DWORD dwIndex)
 	{
-		return InjectFunctionPointer<FunctionPrototype>(*static_cast<LPDWORD*>(pObject) + dwIndex);
+		return InjectFunctionPointer<std::decay_t<FunctionPrototype>>(*static_cast<LPDWORD*>(pObject) + dwIndex);
 	}
 
 protected:
@@ -114,6 +114,9 @@ protected:
 	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
 	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true);
 
+	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD TargetOffset);
+	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD From, DWORD To);
+
 private:
 	bool m_bInit;
 	HMODULE m_hDll, m_hInstance;
@@ -161,9 +164,18 @@ private:
 	template <typename FunctionPrototype>
 	void InjectStdCallFunction(HINSTANCE hInstance, FunctionInjector<FunctionPrototype>* pInjector, LPDWORD lpAddr)
 	{
+		union
+		{
+			FunctionPrototype FunctionPointer;
+			DWORD RawValue;
+		} Bugfix;
+
+		Bugfix.RawValue = *lpAddr;
+
 		byte* pInjectStdcallEntry = GenerateInjectStdcallEntry(hInstance, pInjector, GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::ArgType::Size);
 
-		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
+		pInjector->m_OriginalFunction.OriginalFunctionPointer = Bugfix.FunctionPointer;
+		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(Bugfix.FunctionPointer));
 		pInjector->m_ReplacedFunc.second = nullptr;
 		InjectPointer(lpAddr, reinterpret_cast<DWORD>(pInjectStdcallEntry));
 	}
@@ -171,9 +183,18 @@ private:
 	template <typename FunctionPrototype>
 	void InjectCdeclFunction(HINSTANCE hInstance, FunctionInjector<FunctionPrototype>* pInjector, LPDWORD lpAddr)
 	{
+		union
+		{
+			FunctionPrototype FunctionPointer;
+			DWORD RawValue;
+		} Bugfix;
+
+		Bugfix.RawValue = *lpAddr;
+
 		byte* pInjectCdeclEntry = GenerateInjectCdeclEntry(hInstance, pInjector, GetFunctionAnalysis<FunctionPrototype>::FunctionAnalysis::ArgType::Size);
 
-		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(reinterpret_cast<FunctionPrototype>(*lpAddr)));
+		pInjector->m_OriginalFunction.OriginalFunctionPointer = Bugfix.FunctionPointer;
+		pInjector->m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<FunctionPrototype>>(Bugfix.FunctionPointer));
 		pInjector->m_ReplacedFunc.second = nullptr;
 		InjectPointer(lpAddr, reinterpret_cast<DWORD>(pInjectCdeclEntry));
 	}

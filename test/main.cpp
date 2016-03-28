@@ -68,7 +68,7 @@ int main()
 {
 	/*std::wstring strExe;
 	std::wcin >> strExe;
-	if (!CreateProcessWithDll(strExe.c_str(), _T("InjectorTest.dll")))
+	if (!CreateProcessWithDll(strExe.c_str(), _T("InjectorTest2.dll")))
 	{
 		MessageBox(NULL, _T("Failed"), _T("Error"), MB_OK);
 	}*/
