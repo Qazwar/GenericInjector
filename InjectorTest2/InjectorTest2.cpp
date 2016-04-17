@@ -52,7 +52,9 @@ void InjectorTest2::Dx9CreateHandler(UINT /*SDKVersion*/, IDirect3D9* pDx9)
 	if (pDx9 != nullptr)
 	{
 		m_pDx9 = pDx9;
-		InjectVirtualTable<decltype(&IDirect3D9::CreateDevice)>(m_pDx9, 16)->RegisterAfter(this, &InjectorTest2::Dx9CreateDeviceHandler);
+		auto pInjector = InjectVirtualTable<decltype(&IDirect3D9::CreateDevice)>(m_pDx9, 16);
+		pInjector->RegisterAfter(this, &InjectorTest2::Dx9CreateDeviceHandler);
+		//UnhookInjector(reinterpret_cast<DWORD>(pInjector->GetFunctionPointer()));
 	}
 }
 

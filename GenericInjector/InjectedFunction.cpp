@@ -27,14 +27,12 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 
 			pObject = pOriginObject;
 			pOriginObject = nullptr;
-			//ActualArgSize += sizeof pOriginObject;
 		}
 		else
 		{
 			if (pOriginObject)
 			{
 				ActualArgSize -= sizeof pOriginObject;
-				//pOriginObject = nullptr;
 			}
 		}
 
@@ -107,9 +105,55 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 	{
 		// ReSharper disable once CppEntityNeverUsed
 		LPDWORD tpReturn;
+		// Only replace function can have variable argument
 		if (HasVariableArgument())
 		{
-			// TODO: implement passing variable argument
+			__asm
+			{
+				push ecx;
+				push edx;
+
+				sub esp, DefaultAlignBase * 2;
+				lea ebx, [esp];
+
+				mov esp, pStackTop;
+
+				cmp pOriginObject, 0;
+				je NoObject7;
+				mov ebx, [esp - DefaultAlignBase];
+				push pOriginObject;
+			NoObject7:
+
+				cmp pObject, 0;
+				je NoThis5;
+				lea eax, [ebx + DefaultAlignBase];
+				mov eax, [esp];
+				push pObject;
+			NoThis5:
+
+				mov eax, pFunc;
+				call eax;
+
+				mov tReturnValue, eax;
+
+				cmp pOriginObject, 0;
+				je NoObject8;
+				lea eax, [esp - DefaultAlignBase];
+				mov eax, [ebx];
+			NoObject8:
+
+				cmp pObject, 0;
+				je NoThis6;
+				mov esp, [ebx + DefaultAlignBase];
+				jmp EndOfInject;
+
+			NoThis6:
+				lea esp, [ebx + DefaultAlignBase * 2];
+
+			EndOfInject:
+				pop ecx;
+				pop edx;
+			}
 		}
 		else
 		{

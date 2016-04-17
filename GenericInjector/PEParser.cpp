@@ -10,12 +10,12 @@ PEPaser::PEPaser(const byte* pPEData)
 	init(pPEData);
 }
 
-bool PEPaser::DllImported(tstring const & DllName) const noexcept
+bool PEPaser::DllImported(tstring const& DllName) const noexcept
 {
 	return m_ImportTable.find(DllName) != m_ImportTable.end();
 }
 
-LPDWORD PEPaser::GetImportFunctionAddress(tstring const & DllName, tstring const & Funcname) const noexcept
+LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, tstring const& Funcname) const noexcept
 {
 	auto tItea = m_ImportTable.find(DllName);
 	if (tItea == m_ImportTable.end())
@@ -27,7 +27,7 @@ LPDWORD PEPaser::GetImportFunctionAddress(tstring const & DllName, tstring const
 	return tFuncItea == tItea->second.first.end() ? nullptr : tFuncItea->second;
 }
 
-LPDWORD PEPaser::GetImportFunctionAddress(tstring const & DllName, DWORD Index) const noexcept
+LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, DWORD Index) const noexcept
 {
 	auto tItea = m_ImportTable.find(DllName);
 	if (tItea == m_ImportTable.end())

@@ -51,3 +51,13 @@ ipch/
 *.bat
 *.rar
 *.opendb
+/test/test.vcxproj.user
+/test/test.vcxproj.filters
+/InjectorTest2/InjectorTest2.vcxproj.user
+/InjectorTest2/InjectorTest2.vcxproj.filters
+/InjectorTest/InjectorTest.vcxproj.user
+/InjectorTest/InjectorTest.vcxproj.filters
+/GenericInjector.VC.db
+/GenericInjector/GenericInjector.vcxproj.user
+/GenericInjector/GenericInjector.vcxproj.filters
+/GenericInjector/GenericInjector.vcxproj.bak

@@ -81,6 +81,8 @@ int main()
 	std::wcout.imbue(std::locale("", LC_CTYPE));
 	std::wcout << _T("返回值：") << MessageBox(NULL, _T("阁下果然是装逼高手"), _T("是在下输了"), MB_OKCANCEL | MB_ICONINFORMATION) << std::endl;
 
+	printf_s("%d", 5);
+
 	putchar('w');
 
 	system("pause");

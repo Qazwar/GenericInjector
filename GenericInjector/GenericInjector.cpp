@@ -86,8 +86,8 @@ void GenericInjector::Init(HMODULE hDll, HINSTANCE hInstance)
 	m_hDll = hDll;
 	SetProcess();
 	SetInstance(hInstance);
-	OnLoad();
 	m_bInit = true;
+	OnLoad();
 }
 
 void GenericInjector::Uninit()
@@ -97,8 +97,8 @@ void GenericInjector::Uninit()
 		throw std::runtime_error("Injector have not initialized.");
 	}
 
-	OnUnload();
 	m_bInit = false;
+	OnUnload();
 }
 
 void GenericInjector::SetInstance(HMODULE hModule) noexcept

@@ -168,10 +168,23 @@ struct PopFrontIf<false, T>
 	typedef T Type;
 };
 
+template <bool Condition, typename T>
+struct PopBackIf
+{
+	typedef typename SubSequence<T, 0u, T::Size - 1>::Type Type;
+};
+
+template <typename T>
+struct PopBackIf<false, T>
+{
+	typedef T Type;
+};
+
 struct FunctionInjectorBase
 {
 	virtual ~FunctionInjectorBase() = default;
 
+	virtual LPVOID GetFunctionPointer() const noexcept = 0;
 	virtual void Execute(DWORD dwECX, LPVOID lpStackTop) = 0;
 };
 
@@ -203,7 +216,8 @@ public:
 		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
 		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
 		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
-		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
+		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count, "Too many arguments.");
+		static_assert(!(FunctionAnalysis::HasVariableArgument ^ GetFunctionAnalysis<Func>::HasVariableArgument), "Replace function should have variable argument if original function has variable argument.");
 
 		auto tRet = m_ReplacedFunc.first ? m_ReplacedFunc.first->GetFunctionPointer() : nullptr;
 		m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<Func>>(pFunc));
@@ -232,9 +246,10 @@ public:
 		typedef std::conditional_t<std::is_same<typename FunctionAnalysis::ClassType, void>::value, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
-		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
+		typedef typename PopBackIf<FunctionAnalysis::HasVariableArgument && std::is_same<typename GetType<Func2Arg::Count - 1, Func2Arg>::Type, va_list>::value, typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type>::Type RealFunc2Arg;
 		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
 		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
+		static_assert(!GetFunctionAnalysis<Func>::FunctionAnalysis::HasVariableArgument, "Hook function cannot have variable argument.");
 		m_BeforeFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute));
 	}
 
@@ -250,10 +265,16 @@ public:
 		typedef std::conditional_t<std::is_same<typename FunctionAnalysis::ClassType, void>::value, typename FunctionAnalysis::ArgType, typename AppendSequence<TypeSequence<typename FunctionAnalysis::ClassType>, typename FunctionAnalysis::ArgType>::Type> Func1Arg;
 		typedef typename GetFunctionAnalysis<Func>::FunctionAnalysis::ArgType Func2Arg;
 		typedef typename FunctionAnalysis::ArgType RealFunc1Arg;
-		typedef typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type RealFunc2Arg;
+		typedef typename PopBackIf<FunctionAnalysis::HasVariableArgument && std::is_same<typename GetType<Func2Arg::Count - 1, Func2Arg>::Type, va_list>::value, typename PopFrontIf<!std::is_same<typename FunctionAnalysis::ClassType, void>::value, Func2Arg>::Type>::Type RealFunc2Arg;
 		static_assert(std::is_same<typename FunctionAnalysis::ClassType, void>::value || std::is_convertible<std::add_pointer_t<typename FunctionAnalysis::ClassType>, typename Func2Arg::Type>::value, "Original class type cannot be converted to target class.");
 		static_assert(RealFunc2Arg::Count <= RealFunc1Arg::Count + 1u, "Too many arguments.");
+		static_assert(!GetFunctionAnalysis<Func>::FunctionAnalysis::HasVariableArgument, "Hook function cannot have variable argument.");
 		m_AfterFunc.emplace_back(std::make_pair(std::make_unique<InjectedFunction<Func>>(pObject, pFunc), GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute));
+	}
+
+	LPVOID GetFunctionPointer() const noexcept override
+	{
+		return m_OriginalFunction.RawPointer;
 	}
 
 	void Execute(DWORD dwECX, LPVOID lpStackTop) override
@@ -299,7 +320,7 @@ public:
 		
 		for (auto& Func : m_AfterFunc)
 		{
-			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::ArgType::Count + (std::is_same<typename FunctionAnalysis::ClassType, void>::value ? 1 : 2);
+			tReceiveReturnedValue = Func.first->GetArgCount() == FunctionAnalysis::ArgType::Count + (std::is_same<typename FunctionAnalysis::ClassType, void>::value ? 0 : 1) + 1;
 			tReturnValue = Func.first->Call(Func.second, lpStackTop, pObject, &tReturnValue, tArgSize, tReceiveReturnedValue);
 		}
 		__asm mov eax, tReturnValue;
