@@ -126,14 +126,14 @@ PEPaser const& GenericInjector::GetPEPaser()
 	return *m_pPEPaser;
 }
 
-byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternLen, size_t Alignment) noexcept
+byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept
 {
-	if (!pAddressBase || !pPattern || !PatternLen || !Alignment)
+	if (!pAddressBase || !pPattern || !PatternSize || !Alignment)
 	{
 		return nullptr;
 	}
 
-	size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - PatternLen;
+	size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - std::max(PatternSize, Alignment);
 
 	byte *pCurrentPointer = static_cast<byte*>(pAddressBase);
 	byte *pEndPointer = pCurrentPointer + MemSize;
@@ -143,12 +143,32 @@ byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size
 		return nullptr;
 	}
 
+	if (!pWildcard)
+	{
+		WildcardSize = 0;
+	}
+
 	for (; pCurrentPointer < pEndPointer; pCurrentPointer += Alignment)
 	{
-		if (memcmp(pCurrentPointer, pPattern, PatternLen) == 0)
+		for (size_t i = 0; i < PatternSize; ++i)
 		{
-			return reinterpret_cast<byte*>(pCurrentPointer - pAddressBase);
+			if (pCurrentPointer[i] != pPattern[i])
+			{
+				for (size_t j = 0; j < WildcardSize; ++j)
+				{
+					if (pPattern[i] == pWildcard[j])
+					{
+						goto WildcardMatched;
+					}
+				}
+				goto NotMatched;
+			}
+		WildcardMatched:
+			continue;
 		}
+		return reinterpret_cast<byte*>(pCurrentPointer - static_cast<byte*>(pAddressBase));
+	NotMatched:
+		continue;
 	}
 
 	return nullptr;

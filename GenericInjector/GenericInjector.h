@@ -64,12 +64,18 @@ public:
 	}
 
 	// Return offset of address which match pattern you specified, or nullptr if not found
-	byte* FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternLen, size_t Alignment) noexcept;
+	byte* FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept;
 
-	template <size_t Size>
-	byte* FindMemory(void* pAddressBase, byte(&Pattern)[Size], size_t Alignment) noexcept
+	template <size_t PatternSize>
+	byte* FindMemory(void* pAddressBase, const byte (&Pattern)[PatternSize], size_t Alignment) noexcept
 	{
-		return FindMemory(pAddressBase, Pattern, Size, Alignment);
+		return FindMemory(pAddressBase, Pattern, PatternSize, nullptr, 0, Alignment);
+	}
+
+	template <size_t PatternSize, size_t WildcardSize>
+	byte* FindMemory(void* pAddressBase, const byte(&Pattern)[PatternSize], const byte(&Wildcard)[WildcardSize], size_t Alignment) noexcept
+	{
+		return FindMemory(pAddressBase, Pattern, PatternSize, Wildcard, WildcardSize, Alignment);
 	}
 
 protected:
@@ -116,14 +122,14 @@ protected:
 	}
 
 	template <size_t Size>
-	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte(&lpCode)[Size])
+	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size])
 	{
-		InjectCode(hInstance, dwDestOffset, dwDestSize, lpCode, Size);
+		InjectCode(hInstance, dwDestOffset, dwDestSize, Code, Size);
 	}
 	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
 
 	template <size_t Size>
-	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, byte (&Code)[Size], bool bFillNop = true)
+	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size], bool bFillNop = true)
 	{
 		ModifyCode(hInstance, dwDestOffset, dwDestSize, Code, Size, bFillNop);
 	}

@@ -53,21 +53,16 @@ public:
 			pInjector2->Replace(nullptr);
 			InjectImportTable<decltype(__stdio_common_vfprintf_s)>(_T("ucrtbased.dll"), _T("__stdio_common_vfprintf_s"));
 
-			byte Pattern[] = "pause";
-			auto pMem = reinterpret_cast<ptrdiff_t>(GetInstance()) + FindMemory(GetInstance(), Pattern, 1);
+			constexpr byte Pattern[] = { 0x8B, 0xF4, 0x68, 0x1D, 0x11, 0x2A, 0x2A, 0x8B, 0xFC, 0x68, 0x1D, 0x11, 0x2A, 0x2A, };
+			constexpr byte Wildcard[] = { 0x2A, };
+			auto pMem = FindMemory(GetInstance(), Pattern, Wildcard, 1);
 
-			constexpr byte Target[] = "cls";
-
-			DWORD old;
-			VirtualProtect(pMem, sizeof Target, PAGE_EXECUTE_READWRITE, &old);
-			memcpy_s(pMem, sizeof Pattern, Target, sizeof Target);
-			VirtualProtect(pMem, sizeof Target, old, &old);
-
-			// nop
-			//byte tmpCode[]{ 0x90, };
-			// NOTE: Only usable on my machine, if you want to test it you should get the rva of the code you want to modify and replace arguments yourself.
-			//InjectCode(GetInstance(), 0x16561, 0x47, tmpCode, 1);
-			//ModifyCode(GetInstance(), 0x16561, 0x47, tmpCode, 1);
+			if (pMem)
+			{
+				constexpr byte Target[] = { 0x90, };
+				//ModifyCode(GetInstance(), reinterpret_cast<DWORD>(pMem), sizeof Pattern, Target, false);
+				InjectCode(GetInstance(), reinterpret_cast<DWORD>(pMem), 0x47, Target);
+			}
 		}
 		catch (std::system_error& sysex)
 		{
