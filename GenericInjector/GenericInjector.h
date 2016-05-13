@@ -10,7 +10,7 @@ public:
 	GenericInjector() = default;
 	virtual ~GenericInjector();
 
-	void Init(HMODULE hDll, LPCTSTR lpModuleName = NULL);
+	void Init(HMODULE hDll, LPCTSTR lpModuleName = nullptr);
 	void Init(HMODULE hDll, HINSTANCE hInstance);
 	void Uninit();
 
@@ -63,13 +63,22 @@ public:
 		return InjectFunctionPointer<std::decay_t<FunctionPrototype>>(*static_cast<LPDWORD*>(pObject) + dwIndex);
 	}
 
+	// Return offset of address which match pattern you specified, or nullptr if not found
+	byte* FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternLen, size_t Alignment) noexcept;
+
+	template <size_t Size>
+	byte* FindMemory(void* pAddressBase, byte(&Pattern)[Size], size_t Alignment) noexcept
+	{
+		return FindMemory(pAddressBase, Pattern, Size, Alignment);
+	}
+
 protected:
 	virtual void OnLoad() = 0;
 	virtual void OnUnload() = 0;
 
 protected:
 	void InjectPointer(LPDWORD lpAddr, DWORD dwPointer) const;
-	static void InjectPointer(HINSTANCE hInstance, LPDWORD lpAddr, DWORD dwPointer);
+	static void InjectPointer(HANDLE hProcess, LPDWORD lpAddr, DWORD dwPointer);
 
 	// Cannot call this in hooking function because unhooking will delete the injector
 	void UnhookInjector(DWORD FunctionAddr);
@@ -112,13 +121,19 @@ protected:
 		InjectCode(hInstance, dwDestOffset, dwDestSize, lpCode, Size);
 	}
 	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+
+	template <size_t Size>
+	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, byte (&Code)[Size], bool bFillNop = true)
+	{
+		ModifyCode(hInstance, dwDestOffset, dwDestSize, Code, Size, bFillNop);
+	}
 	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true);
 
 	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD TargetOffset);
 	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD From, DWORD To);
 
 private:
-	bool m_bInit;
+	bool m_Inited;
 	HMODULE m_hDll, m_hInstance;
 	HANDLE m_hProcess;
 	std::unique_ptr<PEPaser> m_pPEPaser;

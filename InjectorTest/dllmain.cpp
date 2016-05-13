@@ -4,7 +4,7 @@
 #include <Windows.h>
 #include <tchar.h>
 
-// Extends from GenericInjector to design your own injector
+// Inherit from GenericInjector to design your own injector
 class InjectorTest final
 	: public GenericInjector
 {
@@ -22,7 +22,7 @@ public:
 	{
 		// Output the argument of our injected function MessageBoxW passed by origin program
 		std::wcout << hWnd << std::endl << lpText << std::endl << lpCaption << std::endl << uType << std::endl << ReturnedValue << std::endl;
-		GetPEPaser().GetImportFunctionAddress(_T(""), _T(""));
+		//GetPEPaser().GetImportFunctionAddress(_T(""), _T(""));
 		// You can modify the returned value by simply assigning it
 		// Turn off the optimization if you are using release configuration
 		ReturnedValue = IDYES;
@@ -52,6 +52,16 @@ public:
 			pInjector2->RegisterAfter(PutC);
 			pInjector2->Replace(nullptr);
 			InjectImportTable<decltype(__stdio_common_vfprintf_s)>(_T("ucrtbased.dll"), _T("__stdio_common_vfprintf_s"));
+
+			byte Pattern[] = "pause";
+			auto pMem = reinterpret_cast<ptrdiff_t>(GetInstance()) + FindMemory(GetInstance(), Pattern, 1);
+
+			constexpr byte Target[] = "cls";
+
+			DWORD old;
+			VirtualProtect(pMem, sizeof Target, PAGE_EXECUTE_READWRITE, &old);
+			memcpy_s(pMem, sizeof Pattern, Target, sizeof Target);
+			VirtualProtect(pMem, sizeof Target, old, &old);
 
 			// nop
 			//byte tmpCode[]{ 0x90, };

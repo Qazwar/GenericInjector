@@ -1,6 +1,7 @@
 #include "PEParser.h"
 
 PEPaser::PEPaser(const byte* pPEData)
+	: m_Inited(false)
 {
 	if (pPEData == nullptr)
 	{
@@ -12,11 +13,16 @@ PEPaser::PEPaser(const byte* pPEData)
 
 bool PEPaser::DllImported(tstring const& DllName) const noexcept
 {
-	return m_ImportTable.find(DllName) != m_ImportTable.end();
+	return m_Inited ? m_ImportTable.find(DllName) != m_ImportTable.end() : false;
 }
 
 LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, tstring const& Funcname) const noexcept
 {
+	if (!m_Inited)
+	{
+		return nullptr;
+	}
+
 	auto tItea = m_ImportTable.find(DllName);
 	if (tItea == m_ImportTable.end())
 	{
@@ -29,6 +35,11 @@ LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, tstring const&
 
 LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, DWORD Index) const noexcept
 {
+	if (!m_Inited)
+	{
+		return nullptr;
+	}
+
 	auto tItea = m_ImportTable.find(DllName);
 	if (tItea == m_ImportTable.end())
 	{
@@ -39,25 +50,72 @@ LPDWORD PEPaser::GetImportFunctionAddress(tstring const& DllName, DWORD Index) c
 	return tFuncItea == tItea->second.second.end() ? nullptr : tFuncItea->second;
 }
 
+IMAGE_DOS_HEADER const& PEPaser::GetDosHeader() const
+{
+	if (!m_Inited)
+	{
+		throw std::runtime_error("Not initialized.");
+	}
+
+	return m_DosHeader;
+}
+
+IMAGE_NT_HEADERS const& PEPaser::GetNTHeaders() const
+{
+	if (!m_Inited)
+	{
+		throw std::runtime_error("Not initialized.");
+	}
+
+	return m_NTHeader;
+}
+
 void PEPaser::init(const byte* pPEData)
 {
+	m_Sections.clear();
+	m_ImportTable.clear();
 	auto pCurrentPointer = pPEData;
-	IMAGE_DOS_HEADER DosHeader;
-	memcpy_s(&DosHeader, sizeof(IMAGE_DOS_HEADER), pCurrentPointer, sizeof(IMAGE_DOS_HEADER));
-	pCurrentPointer = pPEData + DosHeader.e_lfanew;
-	IMAGE_NT_HEADERS NTHeader;
-	memcpy_s(&NTHeader, sizeof(IMAGE_NT_HEADERS), pCurrentPointer, sizeof(IMAGE_NT_HEADERS));
-	pCurrentPointer += sizeof(IMAGE_NT_HEADERS);
-	std::vector<IMAGE_SECTION_HEADER> sections(NTHeader.FileHeader.NumberOfSections);
-	memcpy_s(sections.data(), sections.size() * sizeof(IMAGE_SECTION_HEADER), pCurrentPointer, sections.size() * sizeof(IMAGE_SECTION_HEADER));
-	pCurrentPointer += sections.size() * sizeof(IMAGE_SECTION_HEADER);
-	std::vector<IMAGE_IMPORT_DESCRIPTOR> ImportTable(NTHeader.OptionalHeader.DataDirectory[1].Size / sizeof(IMAGE_IMPORT_DESCRIPTOR));
 
-	for (auto itea = sections.rbegin(); itea != sections.rend(); ++itea)
+	if (IsBadReadPtr(pCurrentPointer, sizeof(IMAGE_DOS_HEADER)))
 	{
-		if (itea->VirtualAddress <= NTHeader.OptionalHeader.DataDirectory[1].VirtualAddress)
+		throw std::invalid_argument("Pointer not readable.");
+	}
+	memcpy_s(&m_DosHeader, sizeof(IMAGE_DOS_HEADER), pCurrentPointer, sizeof(IMAGE_DOS_HEADER));
+	if (m_DosHeader.e_magic != IMAGE_DOS_SIGNATURE)
+	{
+		throw std::invalid_argument("Not a valid pe header.");
+	}
+
+	pCurrentPointer = pPEData + m_DosHeader.e_lfanew;
+	if (IsBadReadPtr(pCurrentPointer, sizeof(IMAGE_NT_HEADERS)))
+	{
+		throw std::invalid_argument("Pointer not readable.");
+	}
+	memcpy_s(&m_NTHeader, sizeof(IMAGE_NT_HEADERS), pCurrentPointer, sizeof(IMAGE_NT_HEADERS));
+	if (m_NTHeader.Signature != IMAGE_NT_SIGNATURE)
+	{
+		throw std::invalid_argument("Not a valid pe header.");
+	}
+
+	pCurrentPointer += sizeof(IMAGE_NT_HEADERS);
+	m_Sections.resize(m_NTHeader.FileHeader.NumberOfSections);
+	if (IsBadReadPtr(pCurrentPointer, m_Sections.size() * sizeof(IMAGE_SECTION_HEADER)))
+	{
+		throw std::invalid_argument("Pointer not readable.");
+	}
+	memcpy_s(m_Sections.data(), m_Sections.size() * sizeof(IMAGE_SECTION_HEADER), pCurrentPointer, m_Sections.size() * sizeof(IMAGE_SECTION_HEADER));
+	pCurrentPointer += m_Sections.size() * sizeof(IMAGE_SECTION_HEADER);
+	std::vector<IMAGE_IMPORT_DESCRIPTOR> ImportTable(m_NTHeader.OptionalHeader.DataDirectory[1].Size / sizeof(IMAGE_IMPORT_DESCRIPTOR));
+
+	for (auto itea = m_Sections.rbegin(); itea != m_Sections.rend(); ++itea)
+	{
+		if (itea->VirtualAddress <= m_NTHeader.OptionalHeader.DataDirectory[1].VirtualAddress)
 		{
-			memcpy_s(ImportTable.data(), ImportTable.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR), NTHeader.OptionalHeader.DataDirectory[1].VirtualAddress + pPEData, ImportTable.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR));
+			if (IsBadReadPtr(m_NTHeader.OptionalHeader.DataDirectory[1].VirtualAddress + pPEData, ImportTable.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR)))
+			{
+				throw std::invalid_argument("Pointer not readable.");
+			}
+			memcpy_s(ImportTable.data(), ImportTable.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR), m_NTHeader.OptionalHeader.DataDirectory[1].VirtualAddress + pPEData, ImportTable.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR));
 			for (auto const& i : ImportTable)
 			{
 				if (i.FirstThunk != 0ul)
@@ -68,6 +126,10 @@ void PEPaser::init(const byte* pPEData)
 					for (uint iFunc = 0u; ; ++iFunc)
 					{
 						IMAGE_THUNK_DATA FuncThunkData;
+						if (IsBadReadPtr(pCurrentPointer, sizeof(IMAGE_THUNK_DATA)))
+						{
+							throw std::invalid_argument("Pointer not readable.");
+						}
 						memcpy_s(&FuncThunkData, sizeof(IMAGE_THUNK_DATA), pCurrentPointer, sizeof(IMAGE_THUNK_DATA));
 						pCurrentPointer += sizeof(IMAGE_THUNK_DATA);
 						if (FuncThunkData.u1.Ordinal == 0ul)
@@ -91,4 +153,6 @@ void PEPaser::init(const byte* pPEData)
 			break;
 		}
 	}
+
+	m_Inited = true;
 }

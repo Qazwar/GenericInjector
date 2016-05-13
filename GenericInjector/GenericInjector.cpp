@@ -1,4 +1,5 @@
 #include "GenericInjector.h"
+#include <algorithm>
 
 namespace
 {
@@ -49,7 +50,7 @@ namespace
 
 	byte* AllocCode(size_t szCode, HANDLE hProcess = INVALID_HANDLE_VALUE)
 	{
-		auto pCode = static_cast<byte*>(VirtualAllocEx(hProcess == INVALID_HANDLE_VALUE ? GetCurrentProcess() : hProcess, NULL, szCode, MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+		auto pCode = static_cast<byte*>(VirtualAllocEx(hProcess == INVALID_HANDLE_VALUE || !hProcess ? GetCurrentProcess() : hProcess, NULL, szCode, MEM_COMMIT, PAGE_EXECUTE_READWRITE));
 		if (!pCode)
 		{
 			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot alloc code.");
@@ -78,7 +79,7 @@ void GenericInjector::Init(HMODULE hDll, LPCTSTR lpModuleName)
 
 void GenericInjector::Init(HMODULE hDll, HINSTANCE hInstance)
 {
-	if (m_bInit)
+	if (m_Inited)
 	{
 		throw std::runtime_error("Injector already initialized.");
 	}
@@ -86,18 +87,18 @@ void GenericInjector::Init(HMODULE hDll, HINSTANCE hInstance)
 	m_hDll = hDll;
 	SetProcess();
 	SetInstance(hInstance);
-	m_bInit = true;
+	m_Inited = true;
 	OnLoad();
 }
 
 void GenericInjector::Uninit()
 {
-	if (!m_bInit)
+	if (!m_Inited)
 	{
 		throw std::runtime_error("Injector have not initialized.");
 	}
 
-	m_bInit = false;
+	m_Inited = false;
 	OnUnload();
 }
 
@@ -112,7 +113,7 @@ void GenericInjector::SetInstance(HMODULE hModule) noexcept
 
 void GenericInjector::SetProcess(HANDLE hProcess) noexcept
 {
-	m_hProcess = hProcess == INVALID_HANDLE_VALUE ? GetCurrentProcess() : hProcess;
+	m_hProcess = hProcess == INVALID_HANDLE_VALUE || !hProcess ? GetCurrentProcess() : hProcess;
 }
 
 PEPaser const& GenericInjector::GetPEPaser()
@@ -125,22 +126,56 @@ PEPaser const& GenericInjector::GetPEPaser()
 	return *m_pPEPaser;
 }
 
-void GenericInjector::InjectPointer(LPDWORD lpAddr, DWORD dwPointer) const
+byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternLen, size_t Alignment) noexcept
 {
-	InjectPointer(GetInstance(), lpAddr, dwPointer);
+	if (!pAddressBase || !pPattern || !PatternLen || !Alignment)
+	{
+		return nullptr;
+	}
+
+	size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - PatternLen;
+
+	byte *pCurrentPointer = static_cast<byte*>(pAddressBase);
+	byte *pEndPointer = pCurrentPointer + MemSize;
+
+	if (IsBadReadPtr(pCurrentPointer, MemSize))
+	{
+		return nullptr;
+	}
+
+	for (; pCurrentPointer < pEndPointer; pCurrentPointer += Alignment)
+	{
+		if (memcmp(pCurrentPointer, pPattern, PatternLen) == 0)
+		{
+			return reinterpret_cast<byte*>(pCurrentPointer - pAddressBase);
+		}
+	}
+
+	return nullptr;
 }
 
-void GenericInjector::InjectPointer(HINSTANCE hInstance, LPDWORD lpAddr, DWORD dwPointer)
+void GenericInjector::InjectPointer(LPDWORD lpAddr, DWORD dwPointer) const
 {
+	InjectPointer(GetProcess(), lpAddr, dwPointer);
+}
+
+void GenericInjector::InjectPointer(HANDLE hProcess, LPDWORD lpAddr, DWORD dwPointer)
+{
+	if (hProcess == INVALID_HANDLE_VALUE || !hProcess)
+	{
+		hProcess = GetCurrentProcess();
+	}
+
 	DWORD tOldProtect;
-	if (!VirtualProtect(lpAddr, sizeof(LPVOID), PAGE_READWRITE, &tOldProtect))
+
+	if (!VirtualProtectEx(hProcess, lpAddr, sizeof(LPVOID), PAGE_READWRITE, &tOldProtect))
 	{
 		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of injected function.");
 	}
 	*lpAddr = dwPointer;
-	if (!VirtualProtect(lpAddr, sizeof(LPVOID), tOldProtect, &tOldProtect))
+	if (!VirtualProtectEx(hProcess, lpAddr, sizeof(LPVOID), tOldProtect, &tOldProtect))
 	{
-		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of inject function");
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of injected function.");
 	}
 }
 
