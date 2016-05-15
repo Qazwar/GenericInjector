@@ -57,11 +57,6 @@ namespace
 		}
 		return pCode;
 	}
-
-	void FlushCode(HINSTANCE hInstance, const byte* pCode, size_t szCode) noexcept
-	{
-		FlushInstructionCache(hInstance, pCode, szCode);
-	}
 }
 
 GenericInjector::~GenericInjector()
@@ -133,10 +128,17 @@ byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size
 		return nullptr;
 	}
 
-	size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - std::max(PatternSize, Alignment);
+	const size_t FirstSectionRVA = GetPEPaser().GetSections()[0].VirtualAddress;
+	const size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - std::max(PatternSize, Alignment) - FirstSectionRVA;
 
-	byte *pCurrentPointer = static_cast<byte*>(pAddressBase);
-	byte *pEndPointer = pCurrentPointer + MemSize;
+	byte* pStart = reinterpret_cast<byte*>(GetInstance()) + FirstSectionRVA;
+	byte* pCurrentPointer = static_cast<byte*>(pAddressBase);
+	if (pCurrentPointer < pStart)
+	{
+		pCurrentPointer = pStart;
+	}
+
+	byte* pEndPointer = pStart + MemSize;
 
 	if (IsBadReadPtr(pCurrentPointer, MemSize))
 	{
@@ -166,7 +168,7 @@ byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size
 		WildcardMatched:
 			continue;
 		}
-		return reinterpret_cast<byte*>(pCurrentPointer - static_cast<byte*>(pAddressBase));
+		return pCurrentPointer;
 	NotMatched:
 		continue;
 	}
@@ -217,6 +219,11 @@ void GenericInjector::UnhookInjector(DWORD FunctionAddr)
 
 void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
 {
+	if (hInstance == INVALID_HANDLE_VALUE || !hInstance || !lpCode)
+	{
+		throw std::invalid_argument("Invalid argument.");
+	}
+
 	if (dwDestSize < sizeof JmpTemplate)
 	{
 		throw std::invalid_argument("Size of dest code should be at least bigger than JmpTemplate.");
@@ -229,7 +236,7 @@ void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 	memcpy_s(pJmpCode, sizeof JmpTemplate, JmpTemplate, sizeof JmpTemplate);
 	*reinterpret_cast<DWORD*>(pJmpCode + 1) = static_cast<DWORD>(pDest + dwDestSize - (pNewCode + dwCodeSize) - sizeof pJmpCode);
 	memcpy_s(pNewCode + dwCodeSize, sizeof JmpTemplate, pJmpCode, sizeof pJmpCode);
-	FlushCode(hInstance, pNewCode, dwCodeSize + sizeof JmpTemplate);
+	FlushInstructionCache(hInstance, pNewCode, dwCodeSize + sizeof JmpTemplate);
 	
 	*reinterpret_cast<DWORD*>(pJmpCode + 1) = static_cast<DWORD>(pNewCode - pDest - sizeof pJmpCode);
 	DWORD oldProtect;
@@ -246,6 +253,11 @@ void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 
 void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop)
 {
+	if (hInstance == INVALID_HANDLE_VALUE || !hInstance || !lpCode)
+	{
+		throw std::invalid_argument("Invalid argument.");
+	}
+
 	if (dwDestSize < dwCodeSize)
 	{
 		throw std::invalid_argument("Size of code is too big, consider using InjectCode.");
@@ -277,7 +289,7 @@ byte* GenericInjector::GenerateInjectStdcallEntry(HINSTANCE hInstance, LPVOID pI
 	*reinterpret_cast<LPVOID*>(pInjectStdcallEntry + 12) = &InjectorHelper;
 	*reinterpret_cast<WORD*>(pInjectStdcallEntry + 24) = static_cast<WORD>(dwArgSize);
 	
-	FlushCode(hInstance, pInjectStdcallEntry, sizeof InjectStdcallTemplate);
+	FlushInstructionCache(hInstance, pInjectStdcallEntry, sizeof InjectStdcallTemplate);
 
 	return pInjectStdcallEntry;
 }
@@ -289,7 +301,7 @@ byte* GenericInjector::GenerateInjectCdeclEntry(HINSTANCE hInstance, LPVOID pInj
 	*reinterpret_cast<LPVOID*>(pInjectCdeclEntry + 7) = pInjector;
 	*reinterpret_cast<LPVOID*>(pInjectCdeclEntry + 12) = &InjectorHelper;
 
-	FlushCode(hInstance, pInjectCdeclEntry, sizeof InjectCdeclTemplate);
+	FlushInstructionCache(hInstance, pInjectCdeclEntry, sizeof InjectCdeclTemplate);
 
 	return pInjectCdeclEntry;
 }
@@ -300,7 +312,7 @@ byte* GenericInjector::GenerateJmpCode(HINSTANCE hInstance, DWORD TargetOffset)
 	memcpy_s(pJmpCode, sizeof JmpTemplate, JmpTemplate, sizeof JmpTemplate);
 	*reinterpret_cast<DWORD*>(pJmpCode + 1) = TargetOffset;
 
-	FlushCode(hInstance, pJmpCode, sizeof JmpTemplate);
+	FlushInstructionCache(hInstance, pJmpCode, sizeof JmpTemplate);
 
 	return pJmpCode;
 }

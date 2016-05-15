@@ -70,6 +70,16 @@ IMAGE_NT_HEADERS const& PEPaser::GetNTHeaders() const
 	return m_NTHeader;
 }
 
+std::vector<IMAGE_SECTION_HEADER> const& PEPaser::GetSections() const
+{
+	if (!m_Inited)
+	{
+		throw std::runtime_error("Not initialized.");
+	}
+
+	return m_Sections;
+}
+
 void PEPaser::init(const byte* pPEData)
 {
 	m_Sections.clear();

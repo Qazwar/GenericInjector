@@ -53,15 +53,15 @@ public:
 			pInjector2->Replace(nullptr);
 			InjectImportTable<decltype(__stdio_common_vfprintf_s)>(_T("ucrtbased.dll"), _T("__stdio_common_vfprintf_s"));
 
-			constexpr byte Pattern[] = { 0x8B, 0xF4, 0x68, 0x1D, 0x11, 0x2A, 0x2A, 0x8B, 0xFC, 0x68, 0x1D, 0x11, 0x2A, 0x2A, };
-			constexpr byte Wildcard[] = { 0x2A, };
+			constexpr byte Pattern[] = { 0x8B, 0xF4, 0x68, 0x1D, 0x11, '*', '*', 0x8B, 0xFC, 0x68, 0x1D, 0x11, '*', '*', };
+			constexpr byte Wildcard[] = { '*', };
 			auto pMem = FindMemory(GetInstance(), Pattern, Wildcard, 1);
 
 			if (pMem)
 			{
 				constexpr byte Target[] = { 0x90, };
-				//ModifyCode(GetInstance(), reinterpret_cast<DWORD>(pMem), sizeof Pattern, Target, false);
-				InjectCode(GetInstance(), reinterpret_cast<DWORD>(pMem), 0x47, Target);
+				//ModifyCode(GetInstance(), reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), sizeof Pattern, Target, false);
+				InjectCode(GetInstance(), reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), 0x47, Target);
 			}
 		}
 		catch (std::system_error& sysex)

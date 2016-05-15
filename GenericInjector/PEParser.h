@@ -16,6 +16,7 @@ public:
 
 	IMAGE_DOS_HEADER const& GetDosHeader() const;
 	IMAGE_NT_HEADERS const& GetNTHeaders() const;
+	std::vector<IMAGE_SECTION_HEADER> const& GetSections() const;
 
 private:
 	bool m_Inited;

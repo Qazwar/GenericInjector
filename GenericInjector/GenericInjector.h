@@ -63,7 +63,7 @@ public:
 		return InjectFunctionPointer<std::decay_t<FunctionPrototype>>(*static_cast<LPDWORD*>(pObject) + dwIndex);
 	}
 
-	// Return offset of address which match pattern you specified, or nullptr if not found
+	// Return address which match pattern you specified, or nullptr if not found
 	byte* FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept;
 
 	template <size_t PatternSize>
