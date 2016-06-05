@@ -3,6 +3,7 @@
 #include "PEParser.h"
 #include <stdexcept>
 #include <unordered_set>
+#include <iterator>
 
 class GenericInjector
 {
@@ -64,18 +65,19 @@ public:
 	}
 
 	// Return address which match pattern you specified, or nullptr if not found
-	byte* FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept;
+	// Search address from pAddressBase to pAddressEnd, if pAddressBase or pAddressEnd is nullptr then use default range
+	byte* FindMemory(void* pAddressBase, void* pAddressEnd, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept;
 
 	template <size_t PatternSize>
-	byte* FindMemory(void* pAddressBase, const byte (&Pattern)[PatternSize], size_t Alignment) noexcept
+	byte* FindMemory(void* pAddressBase, void* pAddressEnd, const byte (&Pattern)[PatternSize], size_t Alignment) noexcept
 	{
-		return FindMemory(pAddressBase, Pattern, PatternSize, nullptr, 0, Alignment);
+		return FindMemory(pAddressBase, pAddressEnd, Pattern, PatternSize, nullptr, 0, Alignment);
 	}
 
 	template <size_t PatternSize, size_t WildcardSize>
-	byte* FindMemory(void* pAddressBase, const byte(&Pattern)[PatternSize], const byte(&Wildcard)[WildcardSize], size_t Alignment) noexcept
+	byte* FindMemory(void* pAddressBase, void* pAddressEnd, const byte(&Pattern)[PatternSize], const byte(&Wildcard)[WildcardSize], size_t Alignment) noexcept
 	{
-		return FindMemory(pAddressBase, Pattern, PatternSize, Wildcard, WildcardSize, Alignment);
+		return FindMemory(pAddressBase, pAddressEnd, Pattern, PatternSize, Wildcard, WildcardSize, Alignment);
 	}
 
 protected:
@@ -90,50 +92,62 @@ protected:
 	void UnhookInjector(DWORD FunctionAddr);
 
 	template <typename Container>
-	void GetCode(HMODULE hInstance, DWORD dwOffset, DWORD dwSize, Container& container)
+	void GetCode(DWORD dwOffset, DWORD dwSize, Container& container) const
 	{
-		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
-		DWORD oldProtect;
-		if (!VirtualProtectEx(GetProcess(), pCode, dwSize, PAGE_EXECUTE_READWRITE, &oldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
-		}
-		container.insert(container.end(), pCode, pCode + dwSize);
-		if (!VirtualProtectEx(GetProcess(), pCode, dwSize, oldProtect, &oldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
-		}
+		GetCode(GetProcess(), GetInstance(), dwOffset, dwSize, container);
 	}
 
 	template <size_t Size>
-	void GetCode(HMODULE hInstance, DWORD dwOffset, byte (&Buffer)[Size])
+	void GetCode(DWORD dwOffset, byte(&Buffer)[Size]) const
 	{
-		byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
-		DWORD oldProtect;
-		if (!VirtualProtectEx(GetProcess(), pCode, Size, PAGE_EXECUTE_READWRITE, &oldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
-		}
-		memcpy_s(Buffer, Size, pCode, Size);
-		if (!VirtualProtectEx(GetProcess(), pCode, Size, oldProtect, &oldProtect))
-		{
-			throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
-		}
+		GetCode(GetProcess(), GetInstance(), dwOffset, Buffer);
+	}
+
+	template <typename Container>
+	static void GetCode(HANDLE hProcess, HMODULE hInstance, DWORD dwOffset, DWORD dwSize, Container& container)
+	{
+		std::vector<byte> Buffer(dwSize);
+		GetCode(hProcess, hInstance, dwOffset, Buffer.data(), Buffer.size());
+		std::copy(Buffer.begin(), Buffer.end(), std::back_inserter(container));
 	}
 
 	template <size_t Size>
-	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size])
+	static void GetCode(HANDLE hProcess, HMODULE hInstance, DWORD dwOffset, byte (&Buffer)[Size])
 	{
-		InjectCode(hInstance, dwDestOffset, dwDestSize, Code, Size);
+		GetCode(hProcess, hInstance, dwOffset, Buffer, Size);
 	}
-	static void InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+
+	static void GetCode(HANDLE hProcess, HMODULE hInstance, DWORD dwOffset, byte* pBuffer, size_t BufferSize);
 
 	template <size_t Size>
-	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size], bool bFillNop = true)
+	void InjectCode(DWORD dwDestOffset, DWORD dwDestSize, const byte(&Code)[Size]) const
 	{
-		ModifyCode(hInstance, dwDestOffset, dwDestSize, Code, Size, bFillNop);
+		InjectCode(GetProcess(), GetInstance(), dwDestOffset, dwDestSize, Code);
 	}
-	static void ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true);
+
+	void InjectCode(DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize) const;
+
+	template <size_t Size>
+	static void InjectCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size])
+	{
+		InjectCode(hProcess, hInstance, dwDestOffset, dwDestSize, Code, Size);
+	}
+	static void InjectCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize);
+
+	template <size_t Size>
+	void ModifyCode(DWORD dwDestOffset, DWORD dwDestSize, const byte(&Code)[Size], bool bFillNop = true) const
+	{
+		ModifyCode(GetProcess(), GetInstance(), dwDestOffset, dwDestSize, Code, bFillNop);
+	}
+
+	void ModifyCode(DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true) const;
+
+	template <size_t Size>
+	static void ModifyCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte (&Code)[Size], bool bFillNop = true)
+	{
+		ModifyCode(hProcess, hInstance, dwDestOffset, dwDestSize, Code, Size, bFillNop);
+	}
+	static void ModifyCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop = true);
 
 	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD TargetOffset);
 	static byte* GenerateJmpCode(HINSTANCE hInstance, DWORD From, DWORD To);

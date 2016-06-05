@@ -121,24 +121,38 @@ PEPaser const& GenericInjector::GetPEPaser()
 	return *m_pPEPaser;
 }
 
-byte* GenericInjector::FindMemory(void* pAddressBase, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept
+byte* GenericInjector::FindMemory(void* pAddressBase, void* pAddressEnd, const byte* pPattern, size_t PatternSize, const byte* pWildcard, size_t WildcardSize, size_t Alignment) noexcept
 {
-	if (!pAddressBase || !pPattern || !PatternSize || !Alignment)
+	if (!pPattern || !PatternSize || !Alignment)
 	{
 		return nullptr;
 	}
 
-	const size_t FirstSectionRVA = GetPEPaser().GetSections()[0].VirtualAddress;
+	const size_t FirstSectionRVA = GetPEPaser().GetSections().front().VirtualAddress;
 	const size_t MemSize = GetPEPaser().GetNTHeaders().OptionalHeader.SizeOfImage - std::max(PatternSize, Alignment) - FirstSectionRVA;
 
 	byte* pStart = reinterpret_cast<byte*>(GetInstance()) + FirstSectionRVA;
+	byte* pEndPointer = pStart + MemSize;
+
 	byte* pCurrentPointer = static_cast<byte*>(pAddressBase);
 	if (pCurrentPointer < pStart)
 	{
 		pCurrentPointer = pStart;
 	}
+	else if (pCurrentPointer >= pEndPointer)
+	{
+		return nullptr;
+	}
 
-	byte* pEndPointer = pStart + MemSize;
+	if (pAddressEnd && pAddressEnd < pEndPointer)
+	{
+		if (pAddressEnd <= pCurrentPointer)
+		{
+			return nullptr;
+		}
+
+		pEndPointer = static_cast<byte*>(pAddressEnd);
+	}
 
 	if (IsBadReadPtr(pCurrentPointer, MemSize))
 	{
@@ -217,8 +231,43 @@ void GenericInjector::UnhookInjector(DWORD FunctionAddr)
 	}
 }
 
-void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
+void GenericInjector::GetCode(HANDLE hProcess, HMODULE hInstance, DWORD dwOffset, byte* pBuffer, size_t BufferSize)
 {
+	if (hProcess == INVALID_HANDLE_VALUE || !hProcess)
+	{
+		hProcess = GetCurrentProcess();
+	}
+
+	if (hInstance == INVALID_HANDLE_VALUE || !hInstance || !pBuffer || !BufferSize)
+	{
+		throw std::invalid_argument("Invalid argument.");
+	}
+
+	byte* pCode = reinterpret_cast<byte*>(hInstance) + dwOffset;
+	DWORD oldProtect;
+	if (!VirtualProtectEx(hProcess, pCode, BufferSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+	}
+	memcpy_s(pBuffer, BufferSize, pCode, BufferSize);
+	if (!VirtualProtectEx(hProcess, pCode, BufferSize, oldProtect, &oldProtect))
+	{
+		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
+	}
+}
+
+void GenericInjector::InjectCode(DWORD dwDestOffset, DWORD dwDestSize, const byte * lpCode, DWORD dwCodeSize) const
+{
+	InjectCode(GetProcess(), GetInstance(), dwDestOffset, dwDestSize, lpCode, dwCodeSize);
+}
+
+void GenericInjector::InjectCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize)
+{
+	if (hProcess == INVALID_HANDLE_VALUE || !hProcess)
+	{
+		hProcess = GetCurrentProcess();
+	}
+
 	if (hInstance == INVALID_HANDLE_VALUE || !hInstance || !lpCode)
 	{
 		throw std::invalid_argument("Invalid argument.");
@@ -240,19 +289,29 @@ void GenericInjector::InjectCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 	
 	*reinterpret_cast<DWORD*>(pJmpCode + 1) = static_cast<DWORD>(pNewCode - pDest - sizeof pJmpCode);
 	DWORD oldProtect;
-	if (!VirtualProtect(pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+	if (!VirtualProtectEx(hProcess, pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
 	{
 		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 	}
 	memcpy_s(pDest, dwDestSize, pJmpCode, sizeof pJmpCode);
-	if (!VirtualProtect(pDest, dwDestSize, oldProtect, &oldProtect))
+	if (!VirtualProtectEx(hProcess, pDest, dwDestSize, oldProtect, &oldProtect))
 	{
 		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 	}
 }
 
-void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop)
+void GenericInjector::ModifyCode(DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop) const
 {
+	ModifyCode(GetProcess(), GetInstance(), dwDestOffset, dwDestSize, lpCode, dwCodeSize, bFillNop);
+}
+
+void GenericInjector::ModifyCode(HANDLE hProcess, HMODULE hInstance, DWORD dwDestOffset, DWORD dwDestSize, const byte* lpCode, DWORD dwCodeSize, bool bFillNop)
+{
+	if (hProcess == INVALID_HANDLE_VALUE || !hProcess)
+	{
+		hProcess = GetCurrentProcess();
+	}
+
 	if (hInstance == INVALID_HANDLE_VALUE || !hInstance || !lpCode)
 	{
 		throw std::invalid_argument("Invalid argument.");
@@ -265,7 +324,7 @@ void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 
 	byte* pDest = reinterpret_cast<byte*>(hInstance) + dwDestOffset;
 	DWORD oldProtect;
-	if (!VirtualProtect(pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
+	if (!VirtualProtectEx(hProcess, pDest, dwDestSize, PAGE_EXECUTE_READWRITE, &oldProtect))
 	{
 		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 	}
@@ -275,7 +334,7 @@ void GenericInjector::ModifyCode(HMODULE hInstance, DWORD dwDestOffset, DWORD dw
 		// NOP: 0x90
 		memset(pDest + dwCodeSize, 0x90, dwDestSize - dwCodeSize);
 	}
-	if (!VirtualProtect(pDest, dwDestSize, oldProtect, &oldProtect))
+	if (!VirtualProtectEx(hProcess, pDest, dwDestSize, oldProtect, &oldProtect))
 	{
 		throw std::system_error(std::error_code(GetLastError(), std::system_category()), "Cannot modify the protect of code.");
 	}

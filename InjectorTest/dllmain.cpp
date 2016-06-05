@@ -55,13 +55,13 @@ public:
 
 			constexpr byte Pattern[] = { 0x8B, 0xF4, 0x68, 0x1D, 0x11, '*', '*', 0x8B, 0xFC, 0x68, 0x1D, 0x11, '*', '*', };
 			constexpr byte Wildcard[] = { '*', };
-			auto pMem = FindMemory(GetInstance(), Pattern, Wildcard, 1);
+			auto pMem = FindMemory(nullptr, nullptr, Pattern, Wildcard, 1);
 
 			if (pMem)
 			{
 				constexpr byte Target[] = { 0x90, };
-				//ModifyCode(GetInstance(), reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), sizeof Pattern, Target, false);
-				InjectCode(GetInstance(), reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), 0x47, Target);
+				//ModifyCode(reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), sizeof Pattern, Target, false);
+				InjectCode(reinterpret_cast<DWORD>(pMem) - reinterpret_cast<DWORD>(GetInstance()), 0x47, Target);
 			}
 		}
 		catch (std::system_error& sysex)
