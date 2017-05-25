@@ -15,7 +15,7 @@ struct CastArgs
 	static void Execute(const byte* pOrigin, byte* pOut)
 	{
 		*reinterpret_cast<typename T2::Type*>(pOut) = static_cast<typename T2::Type>(*reinterpret_cast<const typename T1::Type*>(pOrigin));
-		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + calc_align(sizeof(typename T1::Type)), pOut + calc_align(sizeof(typename T2::Type)));
+		CastArgs<typename T1::Rest, typename T2::Rest>::Execute(pOrigin + alignof(typename T1::Type), pOut + alignof(typename T2::Type));
 	}
 };
 
@@ -96,7 +96,7 @@ public:
 	{
 		constexpr uint tmpArgSize = FunctionInfo::ArgType::AlignedSize;
 		// may include this
-		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - calc_align(sizeof(typename GetType<FunctionInfo::ArgType::Count - 1, typename FunctionInfo::ArgType>::Type)) : tmpArgSize;
+		const uint ActualArgSize = ReceiveReturnedValue ? tmpArgSize - alignof(typename GetType<FunctionInfo::ArgType::Count - 1, typename FunctionInfo::ArgType>::Type) : tmpArgSize;
 		byte tArg[tmpArgSize];
 
 		if (pCastArgFunc)
@@ -111,6 +111,11 @@ public:
 			return 0ul;
 		}
 		return CallImpl(FunctionInfo::CallingConvention, pStackTop, nullptr, pObject, lpReturnValue, ArgSize, ActualArgSize, false);
+	}
+
+	Func GetOriginFunctionPointer() const noexcept
+	{
+		return m_pFunc;
 	}
 
 private:
@@ -201,7 +206,7 @@ public:
 	template <typename Func>
 	// ReSharper disable once CppNonExplicitConvertingConstructor
 	FunctionInjector(Func pFunc)
-		: m_ReplacedFunc(std::move(std::make_unique<InjectedFunction<Func>>(pFunc)))
+		: m_ReplacedFunc(std::make_unique<InjectedFunction<Func>>(pFunc))
 	{
 		m_OriginalFunction.OriginalFunctionPointer = pFunc;
 	}
@@ -220,7 +225,7 @@ public:
 		static_assert(!(FunctionAnalysis::HasVariableArgument ^ GetFunctionAnalysis<Func>::HasVariableArgument), "Replace function should have variable argument if original function has variable argument.");
 
 		auto tRet = m_ReplacedFunc.first ? m_ReplacedFunc.first->GetFunctionPointer() : nullptr;
-		m_ReplacedFunc.first = std::move(std::make_unique<InjectedFunction<Func>>(pFunc));
+		m_ReplacedFunc.first = std::make_unique<InjectedFunction<Func>>(pFunc);
 		m_ReplacedFunc.second = GetCastArgsStruct<RealFunc1Arg, RealFunc2Arg>::Type::Execute;
 
 		return tRet;

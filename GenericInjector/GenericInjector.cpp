@@ -57,6 +57,11 @@ namespace
 		}
 		return pCode;
 	}
+
+	void FreeCode(byte* pMem, HANDLE hProcess = INVALID_HANDLE_VALUE)
+	{
+		VirtualFreeEx(hProcess == INVALID_HANDLE_VALUE || !hProcess ? GetCurrentProcess() : hProcess, pMem, NULL, MEM_RELEASE);
+	}
 }
 
 GenericInjector::~GenericInjector()

@@ -44,7 +44,7 @@ public:
 		{
 			std::wcout.imbue(std::locale("", LC_CTYPE));
 			auto pFunc = GetPEPaser().GetImportFunctionAddress(_T("user32.dll"), _T("MessageBoxW"));
-			std::cout << reinterpret_cast<LPVOID>(*pFunc) << std::endl << MessageBoxW << std::endl << std::endl;
+			std::cout << reinterpret_cast<LPVOID>(*pFunc) << std::endl << MessageBoxW << std::endl << GetProcAddress(GetModuleHandleA("user32.dll"), "MessageBoxW") << std::endl;
 			std::cout << GetPEPaser().GetImportFunctionAddress(_T("ucrtbased.dll"), _T("__stdio_common_vfprintf_s")) << std::endl << std::endl;
 			auto pInjector = InjectImportTable<decltype(MessageBoxW)>(_T("user32.dll"), _T("MessageBoxW"));
 			pInjector->RegisterAfter(this, &InjectorTest::TestHook);

@@ -61,3 +61,4 @@ ipch/
 /GenericInjector/GenericInjector.vcxproj.user
 /GenericInjector/GenericInjector.vcxproj.filters
 /GenericInjector/GenericInjector.vcxproj.bak
+*.db

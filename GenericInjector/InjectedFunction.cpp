@@ -2,6 +2,7 @@
 
 DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTop, LPVOID pArgs, LPVOID pOriginObject, LPDWORD lpReturnValue, DWORD ArgSize, DWORD ActualArgSize, bool ReceiveReturnedValue) const
 {
+	LPVOID pmemcpy = &memcpy;
 	LPVOID pFunc = GetFunctionPointer();
 	if (!pFunc)
 		return 0ul;
@@ -49,7 +50,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 				push ActualArgSize;
 				push pArgs;
 				push eax;
-				call memcpy;
+				call pmemcpy;
 				add esp, 12;
 
 				cmp pOriginObject, 0;
@@ -81,7 +82,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 				push ActualArgSize;
 				push pArgs;
 				push eax;
-				call memcpy;
+				call pmemcpy;
 				add esp, 12;
 
 				cmp pOriginObject, 0;
@@ -171,7 +172,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					push ActualArgSize;
 					push pArgs;
 					push eax;
-					call memcpy;
+					call pmemcpy;
 					add esp, 12;
 
 					cmp pOriginObject, 0;
@@ -190,7 +191,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					push ArgSize;
 					push tpReturn;
 					push pStackTop;
-					call memcpy;
+					call pmemcpy;
 					add esp, 12;
 
 					mov tReturnValue, eax;
@@ -216,7 +217,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					push ActualArgSize;
 					push pArgs;
 					push eax;
-					call memcpy;
+					call pmemcpy;
 					add esp, 12;
 
 					cmp pOriginObject, 0;
@@ -235,7 +236,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 					push ArgSize;
 					push tpReturn;
 					push pStackTop;
-					call memcpy;
+					call pmemcpy;
 					add esp, 12;
 
 					add esp, ActualArgSize;
@@ -263,7 +264,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 				push ActualArgSize;
 				push pArgs;
 				push eax;
-				call memcpy;
+				call pmemcpy;
 				add esp, 12;
 
 				cmp pOriginObject, 0;
@@ -300,7 +301,7 @@ DWORD Functor::CallImpl(CallingConventionEnum CallingConvention, LPVOID pStackTo
 				push ActualArgSize;
 				push pArgs;
 				push eax;
-				call memcpy;
+				call pmemcpy;
 				add esp, 12;
 
 				cmp pOriginObject, 0;

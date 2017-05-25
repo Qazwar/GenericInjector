@@ -1,19 +1,10 @@
 #pragma once
 #include <type_traits>
 #include <cstdint>
+#include <tuple>
 
 typedef uint32_t uint;
 typedef uint8_t byte;
-
-enum : uint
-{
-	DefaultAlignBase = sizeof(void*),
-};
-
-constexpr uint calc_align(uint n, uint align = DefaultAlignBase)
-{
-	return n + align - 1 & ~(align - 1);
-}
 
 template <typename T1, typename T2>
 struct IsSameTemplate
@@ -40,7 +31,7 @@ struct TypeSequence<T, _Rest...>
 	{
 		Count = 1 + sizeof...(_Rest),
 		Size = sizeof(Type) + Rest::Size,
-		AlignedSize = calc_align(sizeof(Type)) + Rest::AlignedSize,
+		AlignedSize = alignof(Type) + Rest::AlignedSize,
 	};
 };
 
@@ -53,6 +44,15 @@ struct TypeSequence<>
 		Size = 0,
 		AlignedSize = 0,
 	};
+};
+
+template <typename typeSeq>
+struct CastToTuple;
+
+template <typename... T>
+struct CastToTuple<TypeSequence<T...>>
+{
+	typedef std::tuple<T...> Type;
 };
 
 template <uint Index, typename T>
@@ -150,6 +150,112 @@ enum class CallingConventionEnum : byte
 	Cdecl,
 	Thiscall,
 	Fastcall,
+	Vectorcall,
+};
+
+template <CallingConventionEnum _CallingConvention, bool _HasVariableArgument, typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer;
+
+template <typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Stdcall, false, void, Ret, Arg...>
+{
+	typedef Ret(__stdcall *Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Stdcall, false, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__stdcall _ClassType::*Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Stdcall, false, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__stdcall _ClassType::*Type)(Arg...) const;
+};
+
+template <typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, false, void, Ret, Arg...>
+{
+	typedef Ret(__cdecl *Type)(Arg...);
+};
+
+template <typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, true, void, Ret, Arg...>
+{
+	typedef Ret(__cdecl *Type)(Arg..., ...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, false, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__cdecl _ClassType::*Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, true, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__cdecl _ClassType::*Type)(Arg..., ...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, false, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__cdecl _ClassType::*Type)(Arg...) const;
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Cdecl, true, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__cdecl _ClassType::*Type)(Arg..., ...) const;
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Thiscall, false, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__thiscall _ClassType::*Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Thiscall, false, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__thiscall _ClassType::*Type)(Arg...) const;
+};
+
+template <typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Fastcall, false, void, Ret, Arg...>
+{
+	typedef Ret(__fastcall *Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Fastcall, false, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__fastcall _ClassType::*Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Fastcall, false, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__fastcall _ClassType::*Type)(Arg...) const;
+};
+
+template <typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Vectorcall, false, void, Ret, Arg...>
+{
+	typedef Ret(__vectorcall *Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Vectorcall, false, _ClassType, Ret, Arg...>
+{
+	typedef Ret(__vectorcall _ClassType::*Type)(Arg...);
+};
+
+template <typename _ClassType, typename Ret, typename... Arg>
+struct GetFunctionPointer<CallingConventionEnum::Vectorcall, false, const _ClassType, Ret, Arg...>
+{
+	typedef Ret(__vectorcall _ClassType::*Type)(Arg...) const;
 };
 
 template <CallingConventionEnum _CallingConvention, bool _HasVariableArgument, typename _ClassType, typename Ret, typename... Arg>
@@ -165,6 +271,8 @@ struct AnalysisFunction
 
 	typedef Ret ReturnType;
 	typedef TypeSequence<Arg...> ArgType;
+
+	typedef typename GetFunctionPointer<_CallingConvention, _HasVariableArgument, _ClassType, Ret, Arg...>::Type FunctionPointerType;
 };
 
 template <typename T>
@@ -238,4 +346,39 @@ struct GetFunctionAnalysis<Ret(__fastcall*)(Arg...)>
 {
 	typedef AnalysisFunction<CallingConventionEnum::Fastcall, false, void, Ret, Arg...> FunctionAnalysis;
 	typedef Ret(__fastcall* OriginalFunction)(Arg...);
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__fastcall ClassType::*)(Arg...)>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Fastcall, false, ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__fastcall ClassType::* OriginalFunction)(Arg...);
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__fastcall ClassType::*)(Arg...)const>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Fastcall, false, const ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__fastcall ClassType::* OriginalFunction)(Arg...)const;
+};
+
+template <typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__vectorcall*)(Arg...)>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Vectorcall, false, void, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__vectorcall* OriginalFunction)(Arg...);
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__vectorcall ClassType::*)(Arg...)>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Vectorcall, false, ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__vectorcall ClassType::* OriginalFunction)(Arg...);
+};
+
+template <typename ClassType, typename Ret, typename... Arg>
+struct GetFunctionAnalysis<Ret(__vectorcall ClassType::*)(Arg...)const>
+{
+	typedef AnalysisFunction<CallingConventionEnum::Vectorcall, false, const ClassType, Ret, Arg...> FunctionAnalysis;
+	typedef Ret(__vectorcall ClassType::* OriginalFunction)(Arg...)const;
 };
